@@ -17,7 +17,7 @@
   --code-bg: rgba(0, 0, 0, 0.045);
   --sel: rgba(10, 132, 255, 0.22);
   --danger: #ff3b30;
-  --mark-gradient: linear-gradient(140deg, #5ac8fa 0%, #0a84ff 55%, #5e5ce6 100%);
+  --mark-gradient: #141416;
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI',
     'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
   --mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace;
@@ -137,10 +137,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; bo
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 30px rgba(10, 132, 255, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   margin-bottom: 22px;
 }
-.app-mark svg { width: 40px; height: 40px; }
+.app-mark svg { width: 58px; height: 58px; }
 
 .welcome-inner h1 {
   font-size: 28px;

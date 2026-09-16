@@ -49,7 +49,9 @@ def render(body):
     dx, dy = SIZE / 2 - cx, SIZE / 2 - cy
 
     img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-    img.paste((255, 255, 255, 255), (0, 0, SIZE, SIZE))
+    mask = Image.new("L", (SIZE, SIZE), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, SIZE - 1, SIZE - 1], radius=int(SIZE * 0.22), fill=255)
+    img.paste((255, 255, 255, 255), (0, 0, SIZE, SIZE), mask)
     img.alpha_composite(layer, (int(round(dx)), int(round(dy))))
     return img
 

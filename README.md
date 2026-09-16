@@ -41,8 +41,11 @@ npm run dev        # Vite 开发服务器 + Electron（带 HMR）
 ## 打包
 
 ```bash
-npm run dist       # electron-builder，配置见 electron-builder.yml
+npm run dist:win   # 打 Windows NSIS 安装包（vite build + electron-builder --win，已内置国内镜像）
+npm run dist       # 按 electron-builder.yml 默认平台打包
 ```
+
+产物输出到 `release/`（或自定义目录）：`tinymd Setup <版本>.exe` 安装包 + `win-unpacked/` 免安装版。
 
 已配置 `.md` / `.markdown` 的 `fileAssociations`，打包安装后可在资源管理器双击 / 右键用「tinymd」打开。
 
