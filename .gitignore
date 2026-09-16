@@ -18,6 +18,5 @@ release2/
 Thumbs.db
 Desktop.ini
 
-# 示例工作区的测试草稿(本地留用，不入库)
-sample-workspace/未命名*
-sample-workspace/新建文件夹*/
+# 示例工作区(本地留用，整个目录不入库)
+sample-workspace/
