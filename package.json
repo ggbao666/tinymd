@@ -1,0 +1,36 @@
+{
+  "name": "tinymd",
+  "productName": "tinymd",
+  "version": "0.1.0",
+  "description": "tinymd — 一个安静的 Markdown 工作空间",
+  "main": "main.js",
+  "author": "weiwenjie",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "vite build",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-image": "^3.31.3",
+    "@tiptap/extension-list": "^3.31.3",
+    "@tiptap/extension-table": "^3.31.3",
+    "@tiptap/extensions": "^3.31.3",
+    "@tiptap/markdown": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^10.0.0",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2",
+    "vite": "^8.3.0",
+    "wait-on": "^9.0.1"
+  }
+}

@@ -1,0 +1,24 @@
+appId: com.jianmo.editor
+productName: tinymd
+directories:
+  output: release
+files:
+  - main.js
+  - preload.cjs
+  - dist/renderer/**/*
+  - package.json
+fileAssociations:
+  - ext: md
+    name: Markdown 文档
+    role: Editor
+  - ext: markdown
+    name: Markdown 文档
+    role: Editor
+win:
+  target: nsis
+  icon: build/icon.ico
+nsis:
+  perMachine: false
+mac:
+  target: dmg
+  category: public.app-category.productivity

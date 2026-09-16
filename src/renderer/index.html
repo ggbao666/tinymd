@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app-file: data: https: http:; connect-src 'self' ws: http: https:; font-src 'self'"
+    />
+    <title>tinymd</title>
+  </head>
+  <body>
+    <!-- 欢迎页：打开目录才能进入编辑器 -->
+    <div id="view-welcome">
+      <div class="welcome-inner">
+        <div class="app-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16.7 3.9a2.4 2.4 0 0 1 3.4 3.4L8.4 19H5v-3.4L16.7 3.9Z" />
+          </svg>
+        </div>
+        <h1>tinymd</h1>
+        <p class="tagline">安静的 Markdown 工作空间</p>
+        <button id="btn-open-folder" class="btn-primary">打开文件夹…</button>
+        <div id="recents" class="recents"></div>
+        <p class="hint">在访达 / 资源管理器中右键 Markdown 文件，也可以直接用「tinymd」打开。</p>
+      </div>
+    </div>
+
+    <!-- 工作区 -->
+    <div id="view-workspace" class="hidden">
+      <header id="topbar">
+        <div class="topbar-left">
+          <button id="btn-sidebar" class="icon-btn" title="切换边栏 (Ctrl+\)">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="2.5" width="12.4" height="11" rx="2"/><path d="M6.2 2.5v11"/></svg>
+          </button>
+          <div id="breadcrumb"></div>
+        </div>
+        <div class="topbar-right">
+          <span id="status"></span>
+          <button id="btn-theme" class="icon-btn" title="切换主题"></button>
+        </div>
+      </header>
+
+      <div class="ws-body">
+        <aside id="sidebar">
+          <div id="sidebar-header">
+            <div id="sidebar-tabs">
+              <button id="tab-files" class="side-tab active">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>
+                文件
+              </button>
+              <button id="tab-outline" class="side-tab">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h9M5.5 8h9M5.5 12h9"/><circle cx="2.4" cy="4" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>
+                大纲
+              </button>
+            </div>
+          </div>
+          <div id="outline"></div>
+          <div id="tree"></div>
+          <div id="sidebar-footer">
+            <button id="btn-add-file" class="icon-btn small" title="新建文件">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+            </button>
+            <button id="btn-add-folder" class="icon-btn small" title="新建文件夹">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/><path d="M8 7v4M6 9h4" stroke-linecap="round"/></svg>
+            </button>
+            <span id="ws-path"></span>
+            <button id="btn-close-ws" title="关闭工作空间">关闭</button>
+          </div>
+          <div id="sidebar-resize" title="拖动调整宽度"></div>
+        </aside>
+
+        <main id="content">
+          <div id="editor-empty" class="hidden">
+            <div class="empty-inner">
+              <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M28 6H12a3 3 0 0 0-3 3v30a3 3 0 0 0 3 3h24a3 3 0 0 0 3-3V17L28 6Z"/><path d="M28 6v11h11"/><path d="M17 24h14M17 31h14"/></svg>
+              <p>从左侧选择一个 Markdown 文件，或新建一个</p>
+              <button id="btn-new-file" class="btn-primary small">新建文件</button>
+            </div>
+          </div>
+          <div id="editor-wrap" class="hidden"><div id="editor"></div></div>
+          <div id="count" class="hidden"></div>
+        </main>
+      </div>
+    </div>
+
+    <!-- 链接编辑浮层 -->
+    <div id="link-popover" class="hidden">
+      <input id="link-input" type="text" placeholder="https://…" spellcheck="false" />
+      <button id="link-apply" class="btn-primary mini">确定</button>
+      <button id="link-remove" class="btn-ghost mini">移除</button>
+      <button id="link-cancel" class="btn-ghost mini">取消</button>
+    </div>
+
+    <input type="file" id="file-input" accept="image/*" multiple hidden />
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

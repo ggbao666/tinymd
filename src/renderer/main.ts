@@ -1,0 +1,627 @@
+import './style.css'
+import { createEditor, type EditorCtl } from './editor'
+import { createTree } from './tree'
+import { showContextMenu } from './contextmenu'
+import { openImageViewer } from './imageviewer'
+import { basename, dirname, imageFileName, relativeFrom } from './util'
+
+const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!
+
+const els = {
+  welcome: $('#view-welcome'),
+  btnOpenFolder: $('#btn-open-folder'),
+  recents: $('#recents'),
+  workspace: $('#view-workspace'),
+  topbar: $('#topbar'),
+  btnSidebar: $('#btn-sidebar'),
+  breadcrumb: $('#breadcrumb'),
+  status: $('#status'),
+  sidebar: $('#sidebar'),
+  tree: $('#tree'),
+  outline: $('#outline'),
+  wsPath: $('#ws-path'),
+  btnCloseWs: $('#btn-close-ws'),
+  content: $('#content'),
+  editorEmpty: $('#editor-empty'),
+  editorWrap: $('#editor-wrap'),
+  editor: $('#editor'),
+  count: $('#count'),
+  linkPopover: $('#link-popover'),
+  linkInput: $('#link-input') as HTMLInputElement,
+  fileInput: $('#file-input') as HTMLInputElement,
+}
+
+if (window.api.platform === 'darwin') document.body.classList.add('mac')
+if (window.api.platform === 'win32') document.body.classList.add('win')
+
+const state = {
+  root: null as string | null,
+  openPath: null as string | null,
+  dirty: false,
+}
+let lastSaved = ''
+let saveTimer: number | undefined
+
+// ---------- editor ----------
+
+const editorCtl: EditorCtl = createEditor(els.editor, {
+  onChange() {
+    state.dirty = true
+    setStatus('编辑中…')
+    updateBreadcrumb()
+    updateCount()
+    scheduleOutline()
+    scheduleSave()
+  },
+  onImageFiles(files) {
+    void saveImageFiles(files)
+  },
+  onOpenLink(url) {
+    if (!url) return
+    if (/^https?:\/\//i.test(url)) {
+      void window.api.openExternal(url)
+      return
+    }
+    if (/\.md$/i.test(url) && state.root && state.openPath) {
+      const abs = resolveInside(state.openPath, url)
+      if (abs) void openFile(abs)
+    }
+  },
+  onPickImage() {
+    els.fileInput.click()
+  },
+  async onImageContext(x: number, y: number, src: string, displaySrc: string) {
+    const abs = state.openPath && src ? resolveInside(state.openPath, src) : null
+    const id = await showContextMenu(
+      [
+        { id: 'view', label: '查看图片', enabled: !!displaySrc },
+        { id: 'reveal', label: '打开所在位置', enabled: !!abs },
+        '-',
+        { id: 'delete', label: '删除图片' },
+      ],
+      x,
+      y,
+    )
+    if (id === 'view' && displaySrc) {
+      openImageViewer(displaySrc, src ? basename(src) : '图片')
+    } else if (id === 'reveal' && abs) {
+      void window.api.reveal(abs)
+    } else if (id === 'delete') {
+      editorCtl.deleteSelectedImage()
+      setStatus('已删除图片')
+    }
+  },
+  async onTextContext(x: number, y: number) {
+    const active = new Set(editorCtl.activeMarks())
+    const mark = (id: string, label: string, hint: string) => ({
+      id,
+      label: (active.has(id) ? '✓ ' : '') + label,
+      hint,
+    })
+    const id = await showContextMenu(
+      [
+        mark('bold', '加粗', '**粗体**'),
+        mark('italic', '斜体', '*斜体*'),
+        mark('code', '行内代码', '`代码`'),
+        mark('strike', '删除线', '~~删除~~'),
+      ],
+      x,
+      y,
+    )
+    if (id) editorCtl.textMark(id)
+  },
+  async onTableContext(x: number, y: number) {
+    const id = await showContextMenu(
+      [
+        { id: 'row-before', label: '在上方插入行' },
+        { id: 'row-after', label: '在下方插入行' },
+        { id: 'col-before', label: '在左侧插入列' },
+        { id: 'col-after', label: '在右侧插入列' },
+        '-',
+        { id: 'header', label: '切换标题行' },
+        '-',
+        { id: 'row-delete', label: '删除行' },
+        { id: 'col-delete', label: '删除列' },
+        '-',
+        { id: 'table-delete', label: '删除表格' },
+      ],
+      x,
+      y,
+    )
+    if (id) editorCtl.tableAction(id)
+  },
+})
+
+function resolveInside(fromFile: string, rel: string): string | null {
+  const segs = (fromFile.replace(/\\/g, '/').split('/')).slice(0, -1)
+  for (const seg of rel.replace(/\\/g, '/').split('/')) {
+    if (!seg || seg === '.') continue
+    if (seg === '..') segs.pop()
+    else segs.push(seg)
+  }
+  const abs = segs.join('/')
+  const root = state.root!.replace(/\\/g, '/')
+  return abs.startsWith(root + '/') ? abs : null
+}
+
+// ---------- tree ----------
+
+const treeCtl = createTree(els.tree, {
+  onOpenFile(p) { void openFile(p) },
+  onContext(kind, path, x, y) { void showTreeMenu(kind, path, x, y) },
+  onRename(oldPath, newName) { void doRename(oldPath, newName) },
+})
+
+async function refreshTree() {
+  if (!state.root) return
+  treeCtl.setData(await window.api.tree(state.root))
+}
+
+// ---------- status ----------
+
+let statusTimer: number | undefined
+function setStatus(text: string, isError = false) {
+  els.status.textContent = text
+  els.status.classList.toggle('error', isError)
+  clearTimeout(statusTimer)
+  if (text === '已保存' || isError) statusTimer = window.setTimeout(() => { els.status.textContent = '' }, 2400)
+}
+
+// ---------- save ----------
+
+function scheduleSave() {
+  clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => void doSave(), 600)
+}
+
+async function doSave() {
+  clearTimeout(saveTimer)
+  if (!state.openPath || !state.dirty) return
+  const md = editorCtl.getMarkdown()
+  if (md === lastSaved) { state.dirty = false; updateBreadcrumb(); return }
+  try {
+    await window.api.write(state.openPath, md)
+    lastSaved = md
+    state.dirty = false
+    setStatus('已保存')
+    updateBreadcrumb()
+  } catch (e) {
+    setStatus('保存失败：' + (e as Error).message, true)
+  }
+}
+
+async function flushSave() {
+  clearTimeout(saveTimer)
+  if (state.dirty && state.openPath) await doSave()
+}
+
+window.addEventListener('beforeunload', () => {
+  if (state.dirty && state.openPath) window.api.flush(state.openPath, editorCtl.getMarkdown())
+})
+
+// ---------- open file / workspace ----------
+
+async function openFile(path: string) {
+  if (path === state.openPath) return
+  await flushSave()
+  try {
+    const md = await window.api.read(path)
+    editorCtl.open(md, dirname(path))
+    state.openPath = path
+    lastSaved = md
+    state.dirty = false
+    treeCtl.select(path)
+    showEditor()
+    updateBreadcrumb()
+    updateCount()
+    document.title = `${basename(path)} — ${basename(state.root || '')}`
+    els.editorWrap.scrollTop = 0
+  } catch (e) {
+    setStatus('无法打开文件', true)
+  }
+}
+
+async function openWorkspace(root: string, selectFile?: string) {
+  await flushSave()
+  await window.api.setRoot(root)
+  state.root = root
+  treeCtl.setData(await window.api.tree(root))
+  els.wsPath.textContent = root
+  els.wsPath.title = root
+  els.welcome.classList.add('hidden')
+  els.workspace.classList.remove('hidden')
+  addRecent(root)
+  document.title = basename(root)
+  if (selectFile) await openFile(selectFile)
+  else showEditorEmpty()
+}
+
+async function closeWorkspace() {
+  await flushSave()
+  state.root = null
+  state.openPath = null
+  state.dirty = false
+  lastSaved = ''
+  treeCtl.clear()
+  els.workspace.classList.add('hidden')
+  els.welcome.classList.remove('hidden')
+  document.title = 'tinymd'
+  renderRecents()
+}
+
+function showEditor() {
+  els.editorEmpty.classList.add('hidden')
+  els.editorWrap.classList.remove('hidden')
+  els.count.classList.remove('hidden')
+  renderOutline()
+}
+
+function showEditorEmpty() {
+  state.openPath = null
+  els.editorWrap.classList.add('hidden')
+  els.count.classList.add('hidden')
+  els.editorEmpty.classList.remove('hidden')
+  renderOutline()
+  updateBreadcrumb()
+  document.title = basename(state.root || '')
+}
+
+function updateBreadcrumb() {
+  const root = state.root ? basename(state.root) : ''
+  const file = state.openPath ? basename(state.openPath) : ''
+  els.breadcrumb.innerHTML = ''
+  const f = document.createElement('span')
+  f.className = 'crumb-folder'
+  f.textContent = root
+  els.breadcrumb.append(f)
+  if (file) {
+    const sep = document.createElement('span')
+    sep.className = 'crumb-sep'
+    sep.textContent = '›'
+    const d = document.createElement('span')
+    d.className = 'crumb-doc'
+    d.textContent = file
+    if (state.dirty) d.classList.add('dirty')
+    els.breadcrumb.append(sep, d)
+  }
+}
+
+function updateCount() {
+  els.count.textContent = editorCtl.wordCountText()
+}
+
+// ---------- outline（文档大纲） ----------
+
+let outlineTimer: number | undefined
+function scheduleOutline() {
+  clearTimeout(outlineTimer)
+  outlineTimer = window.setTimeout(renderOutline, 250)
+}
+
+function renderOutline() {
+  const items = state.openPath ? editorCtl.getOutline() : []
+  els.outline.innerHTML = ''
+  if (!items.length) return
+  for (const it of items) {
+    const row = document.createElement('div')
+    row.className = `outline-item lv-${it.level}`
+    row.textContent = it.text || '（空标题）'
+    row.title = it.text
+    row.addEventListener('click', () => editorCtl.revealPos(it.pos))
+    els.outline.append(row)
+  }
+}
+
+// ---------- sidebar tabs（文件 / 大纲切换） ----------
+
+const TAB_KEY = 'jianmo.sideTab'
+function setSideTab(tab: 'files' | 'outline') {
+  localStorage.setItem(TAB_KEY, tab)
+  document.body.classList.toggle('side-outline', tab === 'outline')
+  $('#tab-files').classList.toggle('active', tab === 'files')
+  $('#tab-outline').classList.toggle('active', tab === 'outline')
+  if (tab === 'outline') renderOutline()
+}
+$('#tab-files').addEventListener('click', () => setSideTab('files'))
+$('#tab-outline').addEventListener('click', () => setSideTab('outline'))
+setSideTab(localStorage.getItem(TAB_KEY) === 'outline' ? 'outline' : 'files')
+
+// ---------- theme（主题：跟随系统 / 亮 / 暗） ----------
+
+const THEME_KEY = 'jianmo.theme'
+type ThemeMode = 'system' | 'light' | 'dark'
+const THEME_ICONS: Record<ThemeMode, string> = {
+  system: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor" stroke="none"/></svg>',
+  light: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/></svg>',
+  dark: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M13.5 9.7A6 6 0 0 1 6.3 2.5a6 6 0 1 0 7.2 7.2Z"/></svg>',
+}
+const THEME_LABEL: Record<ThemeMode, string> = { system: '跟随系统', light: '亮色', dark: '暗色' }
+
+let themeMode: ThemeMode = (['system', 'light', 'dark'] as const).includes(localStorage.getItem(THEME_KEY) as ThemeMode)
+  ? (localStorage.getItem(THEME_KEY) as ThemeMode)
+  : 'system'
+const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
+
+function applyTheme() {
+  const dark = themeMode === 'dark' || (themeMode === 'system' && colorScheme.matches)
+  const root = document.documentElement
+  root.classList.toggle('theme-dark', dark)
+  root.classList.toggle('theme-light', !dark)
+  void window.api.setTheme(themeMode) // 原生右键菜单 + Windows 标题栏按钮跟随
+  const btn = $('#btn-theme')
+  btn.innerHTML = THEME_ICONS[themeMode]
+  btn.title = `主题：${THEME_LABEL[themeMode]}（点击切换）`
+}
+
+$('#btn-theme').addEventListener('click', () => {
+  themeMode = themeMode === 'system' ? 'light' : themeMode === 'light' ? 'dark' : 'system'
+  localStorage.setItem(THEME_KEY, themeMode)
+  applyTheme()
+})
+colorScheme.addEventListener('change', () => {
+  if (themeMode === 'system') applyTheme()
+})
+applyTheme()
+
+// ---------- images ----------
+
+async function saveImageFiles(files: File[]) {
+  if (!state.root || !state.openPath) return
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer())
+      const name = imageFileName(file.type)
+      const res = await window.api.saveImage(name, buf)
+      const rel = relativeFrom(dirname(state.openPath), res.abs)
+      editorCtl.insertImage(rel, '')
+      setStatus(`已存储图片 ${res.fromRoot}`)
+    } catch (e) {
+      setStatus('图片保存失败', true)
+    }
+  }
+}
+
+els.fileInput.addEventListener('change', () => {
+  const files = Array.from(els.fileInput.files || [])
+  els.fileInput.value = ''
+  if (files.length) void saveImageFiles(files)
+})
+
+// ---------- context menu ----------
+
+async function showTreeMenu(kind: 'file' | 'dir' | 'root', path: string, x: number, y: number) {
+  const target = kind === 'root' ? state.root! : path
+  const items: (string | { id: string; label: string })[] = []
+  if (kind === 'file') {
+    items.push({ id: 'open', label: '打开' }, '-')
+    items.push({ id: 'rename', label: '重命名' }, { id: 'reveal', label: '在文件管理器中显示' }, '-')
+    items.push({ id: 'delete', label: '移到废纸篓' })
+  } else if (kind === 'dir') {
+    items.push({ id: 'new-file', label: '新建文件' }, { id: 'new-folder', label: '新建文件夹' }, '-')
+    items.push({ id: 'rename', label: '重命名' }, { id: 'reveal', label: '在文件管理器中显示' }, '-')
+    items.push({ id: 'delete', label: '移到废纸篓' })
+  } else {
+    items.push({ id: 'new-file', label: '新建文件' }, { id: 'new-folder', label: '新建文件夹' })
+  }
+  const id = await showContextMenu(items as never, x, y)
+  if (!id) return
+  switch (id) {
+    case 'open': void openFile(path); break
+    case 'reveal': void window.api.reveal(target); break
+    case 'new-file': await createEntry(target, 'file'); break
+    case 'new-folder': await createEntry(target, 'dir'); break
+    case 'rename': startTreeRename(path); break
+    case 'delete': await doDelete(path); break
+  }
+}
+
+function startTreeRename(path: string) {
+  const row = els.tree.querySelector<HTMLElement>(`.tree-row[data-path="${CSS.escape(path)}"]`)
+  if (!row) return
+  const dbl = new MouseEvent('dblclick', { bubbles: true })
+  row.dispatchEvent(dbl)
+}
+
+async function createEntry(parent: string, type: 'file' | 'dir') {
+  try {
+    const p = await window.api.create(parent, type === 'file' ? '未命名' : '新建文件夹', type)
+    if (type === 'dir') treeCtl.ensureExpanded(p)
+    await refreshTree()
+    if (type === 'file') void openFile(p)
+  } catch { /* ignore */ }
+}
+
+async function doRename(oldPath: string, newName: string) {
+  let name = newName
+  if (/\.(md|markdown|mdown|mkd)$/i.test(oldPath) && !/\.[a-z0-9]+$/i.test(name)) name += '.md'
+  const newPath = await window.api.rename(oldPath, name)
+  await refreshTree()
+  if (!newPath) return
+  if (state.openPath === oldPath) {
+    state.openPath = newPath
+    treeCtl.select(newPath)
+    updateBreadcrumb()
+    document.title = `${basename(newPath)} — ${basename(state.root || '')}`
+  }
+}
+
+async function doDelete(path: string) {
+  await window.api.trash(path)
+  if (state.openPath && (state.openPath === path || state.openPath.startsWith(path.replace(/\\/g, '/') + '/'))) {
+    lastSaved = ''
+    state.dirty = false
+    showEditorEmpty()
+  }
+  await refreshTree()
+}
+
+// ---------- recents ----------
+
+const RECENTS_KEY = 'jianmo.recents'
+function loadRecents(): { path: string; name: string; time: number }[] {
+  try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
+}
+function addRecent(root: string) {
+  const list = loadRecents().filter((r) => r.path !== root)
+  list.unshift({ path: root, name: basename(root), time: Date.now() })
+  localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 8)))
+}
+function renderRecents() {
+  const list = loadRecents()
+  els.recents.innerHTML = ''
+  if (!list.length) return
+  const label = document.createElement('div')
+  label.className = 'recents-label'
+  label.textContent = '最近打开'
+  els.recents.append(label)
+  for (const r of list) {
+    const row = document.createElement('div')
+    row.className = 'recent-row'
+    const icon = document.createElement('span')
+    icon.className = 'recent-icon'
+    icon.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>'
+    const box = document.createElement('div')
+    box.className = 'recent-text'
+    const name = document.createElement('span')
+    name.className = 'recent-name'
+    name.textContent = r.name
+    const pathEl = document.createElement('span')
+    pathEl.className = 'recent-path'
+    pathEl.textContent = r.path
+    box.append(name, pathEl)
+    const remove = document.createElement('button')
+    remove.className = 'recent-remove'
+    remove.title = '从列表移除'
+    remove.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>'
+    remove.addEventListener('click', (e) => {
+      e.stopPropagation()
+      localStorage.setItem(RECENTS_KEY, JSON.stringify(loadRecents().filter((x) => x.path !== r.path)))
+      renderRecents()
+    })
+    row.addEventListener('click', () => void openWorkspace(r.path))
+    row.append(icon, box, remove)
+    els.recents.append(row)
+  }
+}
+
+// ---------- link popover ----------
+
+function openLinkPopover() {
+  if (!state.openPath) return
+  els.linkInput.value = editorCtl.currentLink() || ''
+  els.linkPopover.classList.remove('hidden')
+  els.linkInput.focus()
+  els.linkInput.select()
+}
+
+function closeLinkPopover() {
+  els.linkPopover.classList.add('hidden')
+  editorCtl.focus()
+}
+
+$('#link-apply').addEventListener('click', () => {
+  const v = els.linkInput.value.trim()
+  editorCtl.setLink(v || null)
+  closeLinkPopover()
+})
+$('#link-remove').addEventListener('click', () => {
+  editorCtl.setLink(null)
+  closeLinkPopover()
+})
+$('#link-cancel').addEventListener('click', closeLinkPopover)
+els.linkInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('#link-apply').click()
+  if (e.key === 'Escape') closeLinkPopover()
+})
+
+// ---------- sidebar / misc buttons ----------
+
+function toggleSidebar() {
+  document.body.classList.toggle('no-sidebar')
+}
+els.btnSidebar.addEventListener('click', toggleSidebar)
+
+// ---------- sidebar resize（拖拽调宽） ----------
+
+const SIDEBAR_W_KEY = 'jianmo.sidebarWidth'
+let resizing = false
+
+const savedW = Number(localStorage.getItem(SIDEBAR_W_KEY))
+if (savedW >= 180 && savedW <= 520) els.sidebar.style.width = `${savedW}px`
+
+$('#sidebar-resize').addEventListener('mousedown', (e) => {
+  e.preventDefault()
+  resizing = true
+  document.body.classList.add('resizing')
+})
+document.addEventListener('mousemove', (e) => {
+  if (!resizing) return
+  els.sidebar.style.width = `${Math.min(520, Math.max(180, e.clientX))}px`
+})
+document.addEventListener('mouseup', () => {
+  if (!resizing) return
+  resizing = false
+  document.body.classList.remove('resizing')
+  localStorage.setItem(SIDEBAR_W_KEY, els.sidebar.style.width)
+})
+els.btnCloseWs.addEventListener('click', () => void closeWorkspace())
+els.btnOpenFolder.addEventListener('click', chooseAndOpen)
+$('#btn-add-file').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'file') })
+$('#btn-add-folder').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'dir') })
+els.editorEmpty.querySelector('#btn-new-file')!.addEventListener('click', () => {
+  if (state.root) void createEntry(state.root, 'file')
+})
+
+async function chooseAndOpen() {
+  const p = await window.api.chooseFolder()
+  if (p) void openWorkspace(p)
+}
+
+// ---------- menu events ----------
+
+window.api.onMenu(async (action) => {
+  switch (action) {
+    case 'open-folder': await chooseAndOpen(); break
+    case 'new-file': if (state.root) await createEntry(state.root, 'file'); break
+    case 'save': await doSave(); break
+    case 'close-workspace': await closeWorkspace(); break
+    case 'undo': editorCtl.undo(); break
+    case 'redo': editorCtl.redo(); break
+    case 'link': openLinkPopover(); break
+    case 'toggle-sidebar': toggleSidebar(); break
+  }
+})
+
+// ---------- fs watch ----------
+
+let fsTimer: number | undefined
+window.api.onFsChanged(() => {
+  clearTimeout(fsTimer)
+  fsTimer = window.setTimeout(async () => {
+    if (!state.root) return
+    await refreshTree()
+    if (state.openPath && !state.dirty) {
+      try {
+        const md = await window.api.read(state.openPath)
+        if (md !== lastSaved) {
+          editorCtl.open(md, dirname(state.openPath))
+          lastSaved = md
+          updateCount()
+        }
+      } catch { /* 文件可能刚被删除 */ }
+    }
+  }, 300)
+})
+
+// ---------- open-file (argv / 右键打开 / 二次启动) ----------
+
+window.api.onOpenFile((p) => {
+  if (p) void openWorkspace(dirname(p), p)
+})
+
+// ---------- boot ----------
+
+renderRecents()
+const initial = await window.api.initialFile()
+if (initial) void openWorkspace(dirname(initial), initial)
