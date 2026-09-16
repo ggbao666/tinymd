@@ -291,8 +291,20 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     revealPos(pos: number) {
       try {
         const sel = Selection.near(editor.state.doc.resolve(pos), 1)
-        editor.view.dispatch(editor.state.tr.setSelection(sel).scrollIntoView())
+        editor.view.dispatch(editor.state.tr.setSelection(sel))
         editor.commands.focus()
+        // 大纲定位：把目标标题滚到编辑区偏上位置(留 ~96px 呼吸空间)，
+        // 而不是 scrollIntoView 的最小滚动(会让目标贴到底部)
+        requestAnimationFrame(() => {
+          const dom = editor.view.domAtPos(sel.from)
+          const node = dom.node.nodeType === 1 ? (dom.node as Element) : dom.node.parentElement
+          const el = node?.closest('h1,h2,h3,h4,h5,h6,p,li,img') || node
+          const wrap = editor.view.dom.closest('#editor-wrap') as HTMLElement | null
+          if (el && wrap) {
+            const target = el.getBoundingClientRect().top - wrap.getBoundingClientRect().top + wrap.scrollTop - 96
+            wrap.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+          }
+        })
       } catch { /* 位置可能已失效 */ }
     },
     doc(): PMNode {
