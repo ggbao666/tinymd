@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
@@ -7,6 +8,12 @@ export default defineConfig({
     outDir: '../../dist/renderer',
     emptyOutDir: true,
     target: 'chrome120',
+    rollupOptions: {
+      input: {
+        main: resolve('src/renderer/index.html'),
+        imageViewer: resolve('src/renderer/image-viewer.html'),
+      },
+    },
   },
   server: {
     host: '127.0.0.1',

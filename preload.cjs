@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (url) => ipcRenderer.invoke('ui:openExternal', url),
   popupMenu: (items, x, y) => ipcRenderer.invoke('ui:menu', { items, x, y }),
   setTheme: (mode) => ipcRenderer.invoke('ui:theme', mode),
+  openImageViewer: (src, title) => ipcRenderer.invoke('ui:imageViewer', { src, title }),
+  imageViewerData: () => ipcRenderer.invoke('ui:imageViewerData'),
 
   initialFile: () => ipcRenderer.invoke('app:initialFile'),
 

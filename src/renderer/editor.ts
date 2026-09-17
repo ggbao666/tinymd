@@ -15,6 +15,7 @@ export interface EditorCallbacks {
   onImageFiles(files: File[]): void
   onOpenLink(url: string): void
   onPickImage(): void
+  onViewImage(src: string, displaySrc: string): void
   onImageContext(x: number, y: number, src: string, displaySrc: string): void
   onTextContext(x: number, y: number): void
   onTableContext(x: number, y: number): void
@@ -148,6 +149,27 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       e.preventDefault()
       cb.onOpenLink(a.getAttribute('href') || '')
     }
+  })
+
+  // 双击图片是右键菜单“查看图片”的快捷方式
+  host.addEventListener('dblclick', (e) => {
+    const img = (e.target as HTMLElement).closest('img')
+    if (!img) return
+    e.preventDefault()
+
+    let src = ''
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== 'image') return true
+      const dom = editor.view.nodeDOM(pos)
+      if (dom === img || (dom instanceof HTMLElement && dom.contains(img))) {
+        src = String(node.attrs.src || '')
+        return false
+      }
+      return true
+    })
+
+    const displaySrc = img.getAttribute('src') || ''
+    if (displaySrc) cb.onViewImage(src, displaySrc)
   })
 
   // 右键图片 → 选中图片并弹出图片菜单；右键表格 → 先定位单元格再弹出编辑菜单

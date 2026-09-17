@@ -86,6 +86,8 @@ export interface Api {
   openExternal(url: string): Promise<boolean>
   popupMenu(items: (PopupItem | '-')[], x: number, y: number): Promise<string | null>
   setTheme(mode: 'system' | 'light' | 'dark'): Promise<boolean>
+  openImageViewer(src: string, title: string): Promise<boolean>
+  imageViewerData(): Promise<{ src: string; title: string } | null>
   initialFile(): Promise<string | null>
   onFsChanged(cb: () => void): () => void
   onMenu(cb: (action: string) => void): () => void

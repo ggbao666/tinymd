@@ -70,6 +70,9 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
   onPickImage() {
     els.fileInput.click()
   },
+  onViewImage(src: string, displaySrc: string) {
+    openImageViewer(displaySrc, src ? basename(src) : '图片')
+  },
   async onImageContext(x: number, y: number, src: string, displaySrc: string) {
     const abs = state.openPath && src ? resolveInside(state.openPath, src) : null
     const id = await showContextMenu(

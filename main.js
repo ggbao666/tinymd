@@ -13,6 +13,8 @@ const MIME = {
 }
 
 let win = null
+const imageViewerWindows = new Set()
+const imageViewerData = new Map()
 let currentRoot = null
 let watcher = null
 let watchTimer = null
@@ -117,6 +119,50 @@ function createWindow() {
   if (isDev) win.webContents.on('console-message', (_e, _level, message) => console.log('[renderer]', message))
 
   win.on('closed', () => { win = null })
+}
+
+function createImageViewer(parent, src, title) {
+  src = String(src || '')
+  title = String(title || '图片').slice(0, 200)
+  if (!/^(app-file:|https?:|data:image\/)/i.test(src)) return false
+
+  const viewer = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    minWidth: 560,
+    minHeight: 400,
+    show: false,
+    title,
+    backgroundColor: '#202124',
+    autoHideMenuBar: true,
+    ...(parent && !parent.isDestroyed() ? { parent } : {}),
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : process.platform === 'win32' ? 'hidden' : 'default',
+    titleBarOverlay: process.platform === 'win32'
+      ? { color: '#202124', symbolColor: '#d7d7d9', height: 48 }
+      : undefined,
+    trafficLightPosition: { x: 16, y: 16 },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+    },
+  })
+
+  const viewerId = viewer.webContents.id
+  imageViewerWindows.add(viewer)
+  imageViewerData.set(viewerId, { src, title })
+  viewer.setMenuBarVisibility(false)
+  viewer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  viewer.once('ready-to-show', () => viewer.show())
+  viewer.on('closed', () => {
+    imageViewerData.delete(viewerId)
+    imageViewerWindows.delete(viewer)
+  })
+
+  if (DEV_URL) viewer.loadURL(`${DEV_URL.replace(/\/$/, '')}/image-viewer.html`)
+  else viewer.loadFile(path.join(__dirname, 'dist/renderer/image-viewer.html'))
+  return true
 }
 
 // ---------- app menu ----------
@@ -257,6 +303,11 @@ function registerIpc() {
     if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
     return false
   })
+
+  ipcMain.handle('ui:imageViewer', (e, { src, title }) => (
+    createImageViewer(BrowserWindow.fromWebContents(e.sender), src, title)
+  ))
+  ipcMain.handle('ui:imageViewerData', (e) => imageViewerData.get(e.sender.id) || null)
 
   ipcMain.handle('ui:menu', (e, { items, x, y }) => new Promise((resolve) => {
     const tpl = items.map((it) => it === '-'

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' app-file: data: https: http:; connect-src 'self' ws: http: https:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>查看图片</title>
+  </head>
+  <body>
+    <header id="viewer-toolbar">
+      <div class="viewer-title-wrap">
+        <span class="viewer-file-icon" aria-hidden="true">▧</span>
+        <span id="viewer-title">图片</span>
+      </div>
+      <div class="viewer-actions">
+        <button id="zoom-out" title="缩小 (−)" aria-label="缩小">−</button>
+        <span id="zoom-label">100%</span>
+        <button id="zoom-in" title="放大 (+)" aria-label="放大">+</button>
+        <span class="viewer-separator"></span>
+        <button id="actual-size" title="原始尺寸 (1)" aria-label="原始尺寸">1:1</button>
+        <button id="fit-window" title="适应窗口 (0)" aria-label="适应窗口">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>
+        </button>
+      </div>
+    </header>
+    <main id="viewer-canvas">
+      <img id="viewer-image" alt="" draggable="false" />
+      <div id="viewer-error" hidden>图片加载失败</div>
+    </main>
+    <script type="module" src="/image-viewer-page.ts"></script>
+  </body>
+</html>
