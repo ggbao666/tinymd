@@ -288,15 +288,48 @@ function registerIpc() {
   ipcMain.handle('fs:trash', async (_e, p) => { assertInside(p); await shell.trashItem(p); return true })
   ipcMain.handle('fs:reveal', (_e, p) => { shell.showItemInFolder(p); return true })
 
-  ipcMain.handle('img:save', async (_e, fileName, data) => {
+  ipcMain.handle('img:chooseDirectory', async (_e, defaultPath) => {
+    const options = {
+      title: '选择图片存储目录',
+      buttonLabel: '选择',
+      properties: ['openDirectory', 'createDirectory'],
+    }
+    if (defaultPath && path.isAbsolute(defaultPath)) options.defaultPath = defaultPath
+    const r = await dialog.showOpenDialog(win, options)
+    if (r.canceled || !r.filePaths[0]) return null
+    const selected = path.resolve(r.filePaths[0])
+    allowedRoots.add(selected)
+    return selected
+  })
+
+  ipcMain.handle('img:allowDirectory', (_e, directory) => {
+    if (!directory || !path.isAbsolute(directory)) return false
+    allowedRoots.add(path.resolve(directory))
+    return true
+  })
+
+  ipcMain.handle('img:save', async (_e, fileName, data, documentPath, storage) => {
     if (!currentRoot) throw new Error('尚未打开工作空间')
-    const dir = path.join(currentRoot, 'assets')
+    assertInside(documentPath)
+    const documentDir = path.dirname(documentPath)
+    const mode = storage?.mode
+    let dir
+    if (mode === 'custom') {
+      if (!storage.directory || !path.isAbsolute(storage.directory)) throw new Error('尚未指定图片存储目录')
+      dir = path.resolve(storage.directory)
+      allowedRoots.add(dir)
+    } else if (mode === 'document-assets') {
+      const documentName = path.basename(documentPath, path.extname(documentPath)) || 'document'
+      dir = path.join(documentDir, `assets.${documentName}`)
+    } else {
+      dir = path.join(documentDir, 'assets')
+    }
     await fsp.mkdir(dir, { recursive: true })
     const ext = (path.extname(fileName || '') || '.png').toLowerCase()
     const base = (path.basename(fileName || '', path.extname(fileName || '')).replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)) || 'image'
     const p = await uniquePath(dir, base, ext)
     await fsp.writeFile(p, Buffer.from(data))
-    return { abs: p, fromRoot: path.relative(currentRoot, p).split(path.sep).join('/') }
+    return { abs: p, displayPath: path.relative(documentDir, p).split(path.sep).join('/') }
   })
 
   ipcMain.handle('ui:openExternal', (_e, url) => {

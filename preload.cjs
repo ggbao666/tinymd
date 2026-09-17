@@ -19,7 +19,9 @@ contextBridge.exposeInMainWorld('api', {
   rename: (p, newName) => ipcRenderer.invoke('fs:rename', p, newName),
   trash: (p) => ipcRenderer.invoke('fs:trash', p),
   reveal: (p) => ipcRenderer.invoke('fs:reveal', p),
-  saveImage: (fileName, data) => ipcRenderer.invoke('img:save', fileName, data),
+  chooseImageDirectory: (defaultPath) => ipcRenderer.invoke('img:chooseDirectory', defaultPath),
+  allowImageDirectory: (directory) => ipcRenderer.invoke('img:allowDirectory', directory),
+  saveImage: (fileName, data, documentPath, storage) => ipcRenderer.invoke('img:save', fileName, data, documentPath, storage),
 
   openExternal: (url) => ipcRenderer.invoke('ui:openExternal', url),
   popupMenu: (items, x, y) => ipcRenderer.invoke('ui:menu', { items, x, y }),

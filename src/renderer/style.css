@@ -320,6 +320,151 @@ body.win #topbar { padding-right: 146px; }
 }
 #status.error { color: var(--danger); }
 
+/* ============ 设置中心 ============ */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(5px);
+  animation: settings-fade-in 0.14s ease;
+}
+
+.settings-window {
+  width: min(760px, calc(100vw - 56px));
+  height: min(540px, calc(100vh - 56px));
+  min-height: 430px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.3), 0 3px 12px rgba(0, 0, 0, 0.12);
+  animation: settings-window-in 0.16s ease;
+}
+
+@keyframes settings-fade-in { from { opacity: 0; } }
+@keyframes settings-window-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } }
+
+.settings-header {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px 0 22px;
+  border-bottom: 1px solid var(--hairline);
+}
+.settings-header h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.settings-close {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  border-radius: 8px;
+}
+.settings-close:hover { color: var(--text); background: var(--hover); }
+.settings-close svg { width: 15px; height: 15px; }
+
+.settings-body { flex: 1; min-height: 0; display: flex; }
+.settings-nav {
+  width: 178px;
+  flex: none;
+  padding: 14px 10px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--hairline);
+}
+.settings-nav-item {
+  width: 100%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 11px;
+  color: var(--text-2);
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: left;
+}
+.settings-nav-item:hover { color: var(--text); background: var(--hover); }
+.settings-nav-item.active { color: var(--text); background: var(--active); font-weight: 500; }
+.settings-nav-item svg { width: 17px; height: 17px; flex: none; }
+
+.settings-content { flex: 1; min-width: 0; overflow-y: auto; padding: 30px 34px 40px; }
+.settings-page-heading { margin-bottom: 25px; }
+.settings-page-heading h3 { margin: 0 0 6px; font-size: 22px; line-height: 1.2; }
+.settings-page-heading p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+.settings-group { border: 1px solid var(--hairline-strong); border-radius: 12px; overflow: hidden; }
+.settings-group-title {
+  padding: 10px 14px 8px;
+  color: var(--text-3);
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.settings-option {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 68px;
+  padding: 11px 14px;
+  cursor: pointer;
+}
+.settings-option + .settings-option { border-top: 1px solid var(--hairline); }
+.settings-option:hover { background: var(--hover); }
+.settings-option input { flex: none; margin: 0; accent-color: var(--accent); }
+.settings-option span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.settings-option strong { font-size: 13px; font-weight: 500; }
+.settings-option small {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-choose {
+  flex: none;
+  padding: 6px 11px;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border-radius: 7px;
+  font-size: 12px;
+}
+.settings-choose:hover { background: var(--accent-soft); }
+
+.settings-footer {
+  height: 38px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 18px;
+  color: var(--text-3);
+  border-top: 1px solid var(--hairline);
+  font-size: 11px;
+}
+
+@media (max-width: 660px) {
+  .settings-backdrop { padding: 14px; }
+  .settings-window { width: calc(100vw - 28px); height: calc(100vh - 28px); }
+  .settings-nav { width: 142px; }
+  .settings-content { padding: 24px 22px 34px; }
+}
+
 /* ============ 斜杠菜单 ============ */
 
 .slash-menu {

@@ -1,4 +1,4 @@
-import { Editor } from '@tiptap/core'
+import { Editor, Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
@@ -70,6 +70,26 @@ const ResolvedImage = Image.extend({
 let currentDir = ''
 let slash: ReturnType<typeof createSlashMenu> | null = null
 
+/**
+ * 代码块起始位置的退格规则：
+ * - 非空时吞掉 Backspace，避免代码块与前一段合并或在文档开头被转成段落。
+ * - 只有代码块完全为空（只剩唯一空行）时，才退出代码块。
+ */
+const CodeBlockBackspace = Extension.create({
+  name: 'codeBlockBackspace',
+  priority: 1000,
+  addKeyboardShortcuts() {
+    return {
+      Backspace: () => {
+        const { empty, $anchor } = this.editor.state.selection
+        if (!empty || $anchor.parent.type.name !== 'codeBlock' || $anchor.parentOffset !== 0) return false
+        if (!$anchor.parent.textContent.length) return this.editor.commands.clearNodes()
+        return true
+      },
+    }
+  },
+})
+
 export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
   const editor = new Editor({
     element: host,
@@ -78,6 +98,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         heading: { levels: [1, 2, 3, 4, 5, 6] },
       }),
+      CodeBlockBackspace,
       TaskList,
       TaskItem.configure({ nested: true }),
       ResolvedImage.configure({ inline: false, allowBase64: false }),
@@ -91,12 +112,17 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     content: '',
     editorProps: {
       attributes: { class: 'pm-doc', spellcheck: 'false' },
-      handleTextInput(view, from, _to, text) {
+      handleTextInput(view, from, to, text) {
         if (text !== '/' || !slash) return false
         const $from = view.state.doc.resolve(from)
         if ($from.parent.type.name === 'codeBlock') return false
         const before = $from.parentOffset === 0 ? '' : $from.parent.textBetween(0, $from.parentOffset, '\n', '\ufffc')
-        if ($from.parentOffset === 0 || /\s$/.test(before)) slash.openAt(from + 1)
+        if ($from.parentOffset === 0 || /\s$/.test(before)) {
+          // 主动提交输入事务，避免鼠标重新定位后原生输入与菜单打开存在时序差异。
+          view.dispatch(view.state.tr.insertText(text, from, to).scrollIntoView())
+          slash.openAt(from + text.length)
+          return true
+        }
         return false
       },
       handleKeyDown(view, event) {

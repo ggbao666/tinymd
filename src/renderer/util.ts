@@ -70,6 +70,13 @@ export interface PopupItem {
   hint?: string
 }
 
+export type ImageStorageMode = 'file-assets' | 'custom' | 'document-assets'
+
+export interface ImageStorageSettings {
+  mode: ImageStorageMode
+  directory?: string
+}
+
 export interface Api {
   platform: string
   chooseFolder(): Promise<string | null>
@@ -82,7 +89,9 @@ export interface Api {
   rename(p: string, newName: string): Promise<string | null>
   trash(p: string): Promise<boolean>
   reveal(p: string): Promise<boolean>
-  saveImage(fileName: string, data: Uint8Array): Promise<{ abs: string; fromRoot: string }>
+  chooseImageDirectory(defaultPath?: string): Promise<string | null>
+  allowImageDirectory(directory: string): Promise<boolean>
+  saveImage(fileName: string, data: Uint8Array, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
   openExternal(url: string): Promise<boolean>
   popupMenu(items: (PopupItem | '-')[], x: number, y: number): Promise<string | null>
   setTheme(mode: 'system' | 'light' | 'dark'): Promise<boolean>

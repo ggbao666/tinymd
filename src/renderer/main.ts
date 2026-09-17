@@ -3,7 +3,7 @@ import { createEditor, type EditorCtl } from './editor'
 import { createTree } from './tree'
 import { showContextMenu } from './contextmenu'
 import { openImageViewer } from './imageviewer'
-import { basename, dirname, imageFileName, relativeFrom } from './util'
+import { basename, dirname, imageFileName, relativeFrom, type ImageStorageMode, type ImageStorageSettings } from './util'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
@@ -29,6 +29,9 @@ const els = {
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
   fileInput: $('#file-input') as HTMLInputElement,
+  settingsBackdrop: $('#settings-backdrop'),
+  imageSettingsButton: $('#btn-image-settings') as HTMLButtonElement,
+  imageCustomPath: $('#image-custom-path'),
 }
 
 if (window.api.platform === 'darwin') document.body.classList.add('mac')
@@ -354,6 +357,8 @@ function applyTheme() {
   const btn = $('#btn-theme')
   btn.innerHTML = THEME_ICONS[themeMode]
   btn.title = `主题：${THEME_LABEL[themeMode]}（点击切换）`
+  const settingsRadio = document.querySelector<HTMLInputElement>(`input[name="settings-theme"][value="${themeMode}"]`)
+  if (settingsRadio) settingsRadio.checked = true
 }
 
 $('#btn-theme').addEventListener('click', () => {
@@ -368,6 +373,107 @@ applyTheme()
 
 // ---------- images ----------
 
+const IMAGE_STORAGE_KEY = 'tinymd.imageStorage'
+const IMAGE_STORAGE_MODES = new Set<ImageStorageMode>(['file-assets', 'custom', 'document-assets'])
+
+function loadImageStorage(): ImageStorageSettings {
+  try {
+    const value = JSON.parse(localStorage.getItem(IMAGE_STORAGE_KEY) || '{}') as Partial<ImageStorageSettings>
+    if (value.mode && IMAGE_STORAGE_MODES.has(value.mode)) {
+      return { mode: value.mode, ...(typeof value.directory === 'string' ? { directory: value.directory } : {}) }
+    }
+  } catch { /* 使用默认值 */ }
+  return { mode: 'file-assets' }
+}
+
+let imageStorage = loadImageStorage()
+if (imageStorage.directory) await window.api.allowImageDirectory(imageStorage.directory)
+
+function saveImageStorage() {
+  localStorage.setItem(IMAGE_STORAGE_KEY, JSON.stringify(imageStorage))
+}
+
+function renderImageStorageSettings() {
+  const radio = document.querySelector<HTMLInputElement>(`input[name="image-storage"][value="${imageStorage.mode}"]`)
+  if (radio) radio.checked = true
+  els.imageCustomPath.textContent = imageStorage.directory || '尚未选择目录'
+  els.imageCustomPath.title = imageStorage.directory || ''
+}
+
+function closeImageSettings() {
+  els.settingsBackdrop.classList.add('hidden')
+  els.imageSettingsButton.setAttribute('aria-expanded', 'false')
+}
+
+function openImageSettings() {
+  renderImageStorageSettings()
+  els.settingsBackdrop.classList.remove('hidden')
+  els.imageSettingsButton.setAttribute('aria-expanded', 'true')
+}
+
+async function chooseImageStorageDirectory(): Promise<boolean> {
+  const selected = await window.api.chooseImageDirectory(imageStorage.directory)
+  if (!selected) return false
+  imageStorage = { mode: 'custom', directory: selected }
+  saveImageStorage()
+  renderImageStorageSettings()
+  return true
+}
+
+els.imageSettingsButton.addEventListener('click', (event) => {
+  event.stopPropagation()
+  if (els.settingsBackdrop.classList.contains('hidden')) openImageSettings()
+  else closeImageSettings()
+})
+
+els.settingsBackdrop.addEventListener('click', (event) => {
+  if (event.target === els.settingsBackdrop) closeImageSettings()
+})
+$('#btn-settings-close').addEventListener('click', closeImageSettings)
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeImageSettings()
+})
+
+document.querySelectorAll<HTMLButtonElement>('[data-settings-page]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const page = button.dataset.settingsPage
+    document.querySelectorAll<HTMLElement>('[data-settings-panel]').forEach((panel) => {
+      panel.classList.toggle('hidden', panel.dataset.settingsPanel !== page)
+    })
+    document.querySelectorAll<HTMLButtonElement>('[data-settings-page]').forEach((item) => {
+      item.classList.toggle('active', item === button)
+    })
+  })
+})
+
+document.querySelectorAll<HTMLInputElement>('input[name="settings-theme"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    themeMode = radio.value as ThemeMode
+    localStorage.setItem(THEME_KEY, themeMode)
+    applyTheme()
+  })
+})
+
+document.querySelectorAll<HTMLInputElement>('input[name="image-storage"]').forEach((radio) => {
+  radio.addEventListener('change', async () => {
+    const mode = radio.value as ImageStorageMode
+    if (mode === 'custom' && !imageStorage.directory) {
+      if (!await chooseImageStorageDirectory()) renderImageStorageSettings()
+      return
+    }
+    imageStorage = { ...imageStorage, mode }
+    saveImageStorage()
+    renderImageStorageSettings()
+  })
+})
+
+$('#btn-image-directory').addEventListener('click', (event) => {
+  event.preventDefault()
+  event.stopPropagation()
+  void chooseImageStorageDirectory()
+})
+renderImageStorageSettings()
+
 async function saveImageFiles(files: File[]) {
   if (!state.root || !state.openPath) return
   for (const file of files) {
@@ -375,10 +481,10 @@ async function saveImageFiles(files: File[]) {
     try {
       const buf = new Uint8Array(await file.arrayBuffer())
       const name = imageFileName(file.type)
-      const res = await window.api.saveImage(name, buf)
+      const res = await window.api.saveImage(name, buf, state.openPath, imageStorage)
       const rel = relativeFrom(dirname(state.openPath), res.abs)
       editorCtl.insertImage(rel, '')
-      setStatus(`已存储图片 ${res.fromRoot}`)
+      setStatus(`已存储图片 ${res.displayPath}`)
     } catch (e) {
       setStatus('图片保存失败', true)
     }
