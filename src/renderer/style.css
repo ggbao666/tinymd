@@ -82,22 +82,22 @@ html.theme-dark {
 }
 
 html.theme-neutral {
-  --bg: #d9dad9;
-  --bg-sidebar: #ced0cf;
-  --text: #2d3032;
-  --text-2: #5e6265;
-  --text-3: #818588;
-  --hairline: rgba(32, 35, 37, 0.09);
-  --hairline-strong: rgba(32, 35, 37, 0.15);
-  --hover: rgba(255, 255, 255, 0.28);
-  --active: rgba(32, 35, 37, 0.09);
-  --code-bg: rgba(255, 255, 255, 0.25);
-  --inline-code-bg: #caccce;
-  --inline-code-text: #844258;
-  --inline-code-border: rgba(32, 35, 37, 0.13);
-  --sel: rgba(10, 116, 220, 0.28);
-  --mark-gradient: #36393b;
-  color-scheme: light;
+  --bg: #383a3d;
+  --bg-sidebar: #303235;
+  --text: #f0f0f1;
+  --text-2: #b0b2b5;
+  --text-3: #7d8085;
+  --hairline: rgba(255, 255, 255, 0.075);
+  --hairline-strong: rgba(255, 255, 255, 0.135);
+  --hover: rgba(255, 255, 255, 0.07);
+  --active: rgba(255, 255, 255, 0.11);
+  --code-bg: rgba(255, 255, 255, 0.075);
+  --inline-code-bg: #46484c;
+  --inline-code-text: #ffb1bc;
+  --inline-code-border: rgba(255, 255, 255, 0.14);
+  --sel: rgba(10, 132, 255, 0.36);
+  --mark-gradient: #25272a;
+  color-scheme: dark;
 }
 
 html.theme-light { color-scheme: light; }

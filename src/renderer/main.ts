@@ -336,13 +336,6 @@ setSideTab(localStorage.getItem(TAB_KEY) === 'outline' ? 'outline' : 'files')
 
 const THEME_KEY = 'jianmo.theme'
 type ThemeMode = 'system' | 'light' | 'neutral' | 'dark'
-const THEME_ICONS: Record<ThemeMode, string> = {
-  system: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor" stroke="none"/></svg>',
-  light: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/></svg>',
-  neutral: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.8"/><circle cx="8" cy="8" r="2.9" fill="currentColor" opacity=".38" stroke="none"/></svg>',
-  dark: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M13.5 9.7A6 6 0 0 1 6.3 2.5a6 6 0 1 0 7.2 7.2Z"/></svg>',
-}
-const THEME_LABEL: Record<ThemeMode, string> = { system: '跟随系统', light: '亮色', neutral: '中性', dark: '暗色' }
 
 let themeMode: ThemeMode = (['system', 'light', 'neutral', 'dark'] as const).includes(localStorage.getItem(THEME_KEY) as ThemeMode)
   ? (localStorage.getItem(THEME_KEY) as ThemeMode)
@@ -356,18 +349,10 @@ function applyTheme() {
   root.classList.toggle('theme-light', resolved === 'light')
   root.classList.toggle('theme-neutral', resolved === 'neutral')
   void window.api.setTheme(themeMode) // 原生右键菜单 + Windows 标题栏按钮跟随
-  const btn = $('#btn-theme')
-  btn.innerHTML = THEME_ICONS[themeMode]
-  btn.title = `主题：${THEME_LABEL[themeMode]}（点击切换）`
   const settingsRadio = document.querySelector<HTMLInputElement>(`input[name="settings-theme"][value="${themeMode}"]`)
   if (settingsRadio) settingsRadio.checked = true
 }
 
-$('#btn-theme').addEventListener('click', () => {
-  themeMode = themeMode === 'system' ? 'light' : themeMode === 'light' ? 'neutral' : themeMode === 'neutral' ? 'dark' : 'system'
-  localStorage.setItem(THEME_KEY, themeMode)
-  applyTheme()
-})
 colorScheme.addEventListener('change', () => {
   if (themeMode === 'system') applyTheme()
 })

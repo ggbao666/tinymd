@@ -361,7 +361,7 @@ function registerIpc() {
 
   // 渲染层主题切换后同步：原生菜单（nativeTheme）+ Windows 标题栏按钮
   ipcMain.handle('ui:theme', (_e, mode) => {
-    nativeTheme.themeSource = mode === 'dark' ? 'dark' : mode === 'system' ? 'system' : 'light'
+    nativeTheme.themeSource = mode === 'dark' || mode === 'neutral' ? 'dark' : mode === 'system' ? 'system' : 'light'
     if (process.platform === 'win32' && win) {
       win.setTitleBarOverlay({ color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#eaeaeb' : '#1d1d1f', height: 44 })
     }
