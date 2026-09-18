@@ -3,7 +3,7 @@ import { createEditor, type EditorCtl } from './editor'
 import { createTree } from './tree'
 import { showContextMenu } from './contextmenu'
 import { openImageViewer } from './imageviewer'
-import { basename, dirname, imageFileName, relativeFrom, type ImageStorageMode, type ImageStorageSettings } from './util'
+import { basename, dirname, encodeMarkdownPath, imageFileName, relativeFrom, resolveRel, type ImageStorageMode, type ImageStorageSettings } from './util'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
@@ -139,13 +139,7 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
 })
 
 function resolveInside(fromFile: string, rel: string): string | null {
-  const segs = (fromFile.replace(/\\/g, '/').split('/')).slice(0, -1)
-  for (const seg of rel.replace(/\\/g, '/').split('/')) {
-    if (!seg || seg === '.') continue
-    if (seg === '..') segs.pop()
-    else segs.push(seg)
-  }
-  const abs = segs.join('/')
+  const abs = resolveRel(dirname(fromFile), rel)
   const root = state.root!.replace(/\\/g, '/')
   return abs.startsWith(root + '/') ? abs : null
 }
@@ -339,7 +333,7 @@ type ThemeMode = 'system' | 'light' | 'neutral' | 'dark'
 
 let themeMode: ThemeMode = (['system', 'light', 'neutral', 'dark'] as const).includes(localStorage.getItem(THEME_KEY) as ThemeMode)
   ? (localStorage.getItem(THEME_KEY) as ThemeMode)
-  : 'system'
+  : 'neutral'
 const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
 
 function applyTheme() {
@@ -469,7 +463,7 @@ async function saveImageFiles(files: File[]) {
       const buf = new Uint8Array(await file.arrayBuffer())
       const name = imageFileName(file.type)
       const res = await window.api.saveImage(name, buf, state.openPath, imageStorage)
-      const rel = relativeFrom(dirname(state.openPath), res.abs)
+      const rel = encodeMarkdownPath(relativeFrom(dirname(state.openPath), res.abs))
       editorCtl.insertImage(rel, '')
       setStatus(`已存储图片 ${res.displayPath}`)
     } catch (e) {
@@ -525,15 +519,26 @@ async function createEntry(parent: string, type: 'file' | 'dir') {
     if (type === 'dir') treeCtl.ensureExpanded(p)
     await refreshTree()
     if (type === 'file') void openFile(p)
-  } catch { /* ignore */ }
+  } catch (e) {
+    setStatus(e instanceof Error ? e.message : '新建失败', true)
+  }
 }
 
 async function doRename(oldPath: string, newName: string) {
   let name = newName
   if (/\.(md|markdown|mdown|mkd)$/i.test(oldPath) && !/\.[a-z0-9]+$/i.test(name)) name += '.md'
+  const error = await window.api.validateName(name)
+  if (error) {
+    await refreshTree()
+    setStatus(error, true)
+    return
+  }
   const newPath = await window.api.rename(oldPath, name)
   await refreshTree()
-  if (!newPath) return
+  if (!newPath) {
+    setStatus('已存在同名文件或文件夹', true)
+    return
+  }
   if (state.openPath === oldPath) {
     state.openPath = newPath
     treeCtl.select(newPath)

@@ -7,7 +7,7 @@ import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, Selection } from '@tiptap/pm/state'
-import { resolveRel, toMediaUrl } from './util'
+import { normalizeMarkdownImagePaths, resolveRel, toMediaUrl } from './util'
 import { createSlashMenu, slashGlyph, slashIcons } from './slash'
 
 export interface EditorCallbacks {
@@ -253,7 +253,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     open(markdown: string, fileDir: string) {
       currentDir = fileDir
       slash?.close()
-      editor.commands.setContent(markdown, { contentType: 'markdown', emitUpdate: false })
+      editor.commands.setContent(normalizeMarkdownImagePaths(markdown), { contentType: 'markdown', emitUpdate: false })
       editor.view.dom.scrollTop = 0
     },
     getMarkdown(): string {

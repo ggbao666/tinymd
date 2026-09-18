@@ -32,6 +32,19 @@ function assertInside(p) {
   if (!currentRoot || !insideRoot(currentRoot, p)) throw new Error('路径不在当前工作空间内')
 }
 
+function entryNameError(value) {
+  const name = String(value ?? '')
+  if (!name) return '名称不能为空'
+  if (/\s/.test(name)) return '名称不能包含空格或其他空白字符'
+  if (/[\x00-\x1f\\/:*?"<>|]/.test(name)) return '名称包含不允许的字符 \\ / : * ? " < > |'
+  if (name === '.' || name === '..') return '不能使用 . 或 .. 作为名称'
+  if (name.startsWith('.')) return '名称不能以点开头'
+  if (name.endsWith('.')) return '名称不能以点结尾'
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) return '不能使用系统保留名称'
+  if (name.length > 255) return '名称不能超过 255 个字符'
+  return null
+}
+
 function findFileArg(argv) {
   for (const a of argv.slice(1)) {
     try {
@@ -42,12 +55,12 @@ function findFileArg(argv) {
   return null
 }
 
-async function uniquePath(parent, base, ext) {
+async function uniquePath(parent, base, ext, suffixSeparator = ' ') {
   let i = 1
   let name = base + ext
   for (;;) {
     const p = path.join(parent, name)
-    try { await fsp.access(p); i++; name = `${base} ${i}${ext}` } catch { return p }
+    try { await fsp.access(p); i++; name = `${base}${suffixSeparator}${i}${ext}` } catch { return p }
   }
 }
 
@@ -268,16 +281,21 @@ function registerIpc() {
 
   ipcMain.handle('fs:create', async (_e, parent, base, type) => {
     assertInside(parent)
-    const p = await uniquePath(parent, base, type === 'file' ? '.md' : '')
+    const ext = type === 'file' ? '.md' : ''
+    const error = entryNameError(String(base) + ext)
+    if (error) throw new Error(error)
+    const p = await uniquePath(parent, base, ext, '')
     if (type === 'dir') await fsp.mkdir(p)
     else await fsp.writeFile(p, '', 'utf8')
     return p
   })
 
+  ipcMain.handle('fs:validateName', (_e, name) => entryNameError(name))
+
   ipcMain.handle('fs:rename', async (_e, oldPath, newName) => {
     assertInside(oldPath)
-    newName = String(newName).trim()
-    if (!newName || /[\\/:*?"<>|]/.test(newName)) return null
+    newName = String(newName)
+    if (entryNameError(newName)) return null
     const target = path.join(path.dirname(oldPath), newName)
     if (target === oldPath) return oldPath
     try { await fsp.access(target); return null } catch { /* 不存在即可重命名 */ }

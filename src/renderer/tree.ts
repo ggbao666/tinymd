@@ -59,7 +59,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
         if (!renamePath) return
         const oldPath = renamePath
         renamePath = null
-        if (commit && input.value.trim() && input.value.trim() !== baseName) h.onRename(oldPath, input.value.trim())
+        if (commit && input.value !== baseName) h.onRename(oldPath, input.value)
         else render()
       }
       input.addEventListener('keydown', (e) => {

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   write: (p, content) => ipcRenderer.invoke('fs:write', p, content),
   flush: (p, content) => ipcRenderer.sendSync('fs:flush', { p, content }),
   create: (parent, base, type) => ipcRenderer.invoke('fs:create', parent, base, type),
+  validateName: (name) => ipcRenderer.invoke('fs:validateName', name),
   rename: (p, newName) => ipcRenderer.invoke('fs:rename', p, newName),
   trash: (p) => ipcRenderer.invoke('fs:trash', p),
   reveal: (p) => ipcRenderer.invoke('fs:reveal', p),

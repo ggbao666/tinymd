@@ -15,7 +15,9 @@ export function dirname(p: string): string {
 
 /** 绝对路径 + 相对路径（支持 .. 与 .）合并为绝对 posix 路径 */
 export function resolveRel(dir: string, rel: string): string {
-  const r = posixify(rel)
+  const r = posixify(rel).split('/').map((seg) => {
+    try { return decodeURIComponent(seg) } catch { return seg }
+  }).join('/')
   if (/^[a-zA-Z]:\//.test(r) || r.startsWith('/')) return r
   const segs = posixify(dir).split('/')
   for (const seg of r.split('/')) {
@@ -35,6 +37,25 @@ export function relativeFrom(fromDir: string, target: string): string {
   while (i < from.length && i < to.length && from[i] === to[i]) i++
   const up = from.length - i
   return [...Array(up).fill('..'), ...to.slice(i)].join('/') || '.'
+}
+
+/** 文件系统路径 → 可安全写入 Markdown 图片目标的路径。 */
+export function encodeMarkdownPath(p: string): string {
+  return posixify(p).split('/').map((seg) => {
+    if (!seg || seg === '.' || seg === '..' || /^[a-zA-Z]:$/.test(seg)) return seg
+    return encodeURIComponent(seg).replace(/[!'()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)
+  }).join('/')
+}
+
+/** 兼容旧版本写出的含未转义空格的本地图片链接。 */
+export function normalizeMarkdownImagePaths(markdown: string): string {
+  return markdown.replace(/!\[([^\]\r\n]*)\]\(([^)\r\n]+)\)/g, (whole, alt: string, destination: string) => {
+    const value = destination.trim()
+    if (!value.includes(' ') || (value.startsWith('<') && value.endsWith('>'))) return whole
+    // 保留标准 Markdown 的可选标题语法：![alt](path "title")
+    if (/^\S+\s+["']/.test(value)) return whole
+    return `![${alt}](${value.replace(/ /g, '%20')})`
+  })
 }
 
 /** 本地文件 → app-file:// 媒体 URL（先解码再编码，避免 %xx 被二次编码） */
@@ -86,6 +107,7 @@ export interface Api {
   write(p: string, content: string): Promise<boolean>
   flush(p: string, content: string): boolean
   create(parent: string, base: string, type: 'file' | 'dir'): Promise<string>
+  validateName(name: string): Promise<string | null>
   rename(p: string, newName: string): Promise<string | null>
   trash(p: string): Promise<boolean>
   reveal(p: string): Promise<boolean>
