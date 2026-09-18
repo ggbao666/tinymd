@@ -96,6 +96,7 @@ export type ImageStorageMode = 'file-assets' | 'custom' | 'document-assets'
 export interface ImageStorageSettings {
   mode: ImageStorageMode
   directory?: string
+  maxDownloadSizeMB: number
 }
 
 export interface Api {
@@ -114,6 +115,7 @@ export interface Api {
   chooseImageDirectory(defaultPath?: string): Promise<string | null>
   allowImageDirectory(directory: string): Promise<boolean>
   saveImage(fileName: string, data: Uint8Array, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
+  downloadImage(url: string, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
   openExternal(url: string): Promise<boolean>
   popupMenu(items: (PopupItem | '-')[], x: number, y: number): Promise<string | null>
   setTheme(mode: 'system' | 'light' | 'neutral' | 'dark'): Promise<boolean>

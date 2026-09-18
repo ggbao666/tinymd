@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   chooseImageDirectory: (defaultPath) => ipcRenderer.invoke('img:chooseDirectory', defaultPath),
   allowImageDirectory: (directory) => ipcRenderer.invoke('img:allowDirectory', directory),
   saveImage: (fileName, data, documentPath, storage) => ipcRenderer.invoke('img:save', fileName, data, documentPath, storage),
+  downloadImage: (url, documentPath, storage) => ipcRenderer.invoke('img:download', url, documentPath, storage),
 
   openExternal: (url) => ipcRenderer.invoke('ui:openExternal', url),
   popupMenu: (items, x, y) => ipcRenderer.invoke('ui:menu', { items, x, y }),

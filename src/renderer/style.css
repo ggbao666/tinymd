@@ -333,6 +333,7 @@ body.win #topbar { padding-right: 146px; }
 .settings-page-heading h3 { margin: 0 0 6px; font-size: 22px; line-height: 1.2; }
 .settings-page-heading p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
 .settings-group { border: 1px solid var(--hairline-strong); border-radius: 12px; overflow: hidden; }
+.settings-group + .settings-group { margin-top: 18px; }
 .settings-group-title {
   padding: 10px 14px 8px;
   color: var(--text-3);
@@ -374,6 +375,38 @@ body.win #topbar { padding-right: 146px; }
   font-size: 12px;
 }
 .settings-choose:hover { background: var(--accent-soft); }
+
+.settings-value-row {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+}
+.settings-value-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.settings-value-row strong { font-size: 13px; font-weight: 500; }
+.settings-value-row small { color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.settings-number {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.settings-number input {
+  width: 72px;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 7px;
+  font: inherit;
+  text-align: right;
+  outline: none;
+}
+.settings-number input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-softer); }
 
 .settings-footer {
   height: 38px;

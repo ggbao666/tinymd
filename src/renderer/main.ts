@@ -35,6 +35,7 @@ const els = {
   settingsBackdrop: $('#settings-backdrop'),
   imageSettingsButton: $('#btn-image-settings') as HTMLButtonElement,
   imageCustomPath: $('#image-custom-path'),
+  imageMaxDownloadSize: $('#image-max-download-size') as HTMLInputElement,
 }
 
 if (window.api.platform === 'darwin') document.body.classList.add('mac')
@@ -63,6 +64,9 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
   },
   onImageFiles(files) {
     void saveImageFiles(files)
+  },
+  onRemoteImages(urls) {
+    void localizeRemoteImages(urls)
   },
   onOpenLink(url) {
     if (!url) return
@@ -229,6 +233,7 @@ async function openFile(path: string) {
     document.title = `${basename(path)} — ${basename(state.root || '')}`
     els.editorWrap.scrollTop = 0
     els.sourceEditor.scrollTop = 0
+    void localizeRemoteImages(editorCtl.remoteImageSources())
   } catch (e) {
     setStatus('无法打开文件', true)
   }
@@ -338,6 +343,7 @@ function setEditorMode(mode: EditorMode) {
   showEditor()
   updateBreadcrumb()
   updateCount()
+  if (mode === 'source') void localizeRemoteImages(remoteImageUrlsInMarkdown(els.sourceEditor.value))
   requestAnimationFrame(() => {
     if (mode === 'source') els.sourceEditor.focus()
     else editorCtl.focus()
@@ -355,6 +361,7 @@ els.sourceEditor.addEventListener('input', () => {
   updateCount()
   if (state.dirty) scheduleSave()
   else clearTimeout(saveTimer)
+  void localizeRemoteImages(remoteImageUrlsInMarkdown(els.sourceEditor.value))
 })
 
 els.sourceEditor.addEventListener('keydown', (event) => {
@@ -431,15 +438,25 @@ applyTheme()
 
 const IMAGE_STORAGE_KEY = 'tinymd.imageStorage'
 const IMAGE_STORAGE_MODES = new Set<ImageStorageMode>(['file-assets', 'custom', 'document-assets'])
+const DEFAULT_IMAGE_DOWNLOAD_LIMIT_MB = 30
+
+function normalizeImageDownloadLimit(value: unknown): number {
+  const number = Math.round(Number(value))
+  return Number.isFinite(number) && number >= 1 ? Math.min(1024, number) : DEFAULT_IMAGE_DOWNLOAD_LIMIT_MB
+}
 
 function loadImageStorage(): ImageStorageSettings {
   try {
     const value = JSON.parse(localStorage.getItem(IMAGE_STORAGE_KEY) || '{}') as Partial<ImageStorageSettings>
     if (value.mode && IMAGE_STORAGE_MODES.has(value.mode)) {
-      return { mode: value.mode, ...(typeof value.directory === 'string' ? { directory: value.directory } : {}) }
+      return {
+        mode: value.mode,
+        ...(typeof value.directory === 'string' ? { directory: value.directory } : {}),
+        maxDownloadSizeMB: normalizeImageDownloadLimit(value.maxDownloadSizeMB),
+      }
     }
   } catch { /* 使用默认值 */ }
-  return { mode: 'file-assets' }
+  return { mode: 'file-assets', maxDownloadSizeMB: DEFAULT_IMAGE_DOWNLOAD_LIMIT_MB }
 }
 
 let imageStorage = loadImageStorage()
@@ -454,6 +471,7 @@ function renderImageStorageSettings() {
   if (radio) radio.checked = true
   els.imageCustomPath.textContent = imageStorage.directory || '尚未选择目录'
   els.imageCustomPath.title = imageStorage.directory || ''
+  els.imageMaxDownloadSize.value = String(imageStorage.maxDownloadSizeMB)
 }
 
 function closeImageSettings() {
@@ -470,7 +488,7 @@ function openImageSettings() {
 async function chooseImageStorageDirectory(): Promise<boolean> {
   const selected = await window.api.chooseImageDirectory(imageStorage.directory)
   if (!selected) return false
-  imageStorage = { mode: 'custom', directory: selected }
+  imageStorage = { ...imageStorage, mode: 'custom', directory: selected }
   saveImageStorage()
   renderImageStorageSettings()
   return true
@@ -528,7 +546,58 @@ $('#btn-image-directory').addEventListener('click', (event) => {
   event.stopPropagation()
   void chooseImageStorageDirectory()
 })
+els.imageMaxDownloadSize.addEventListener('change', () => {
+  imageStorage = { ...imageStorage, maxDownloadSizeMB: normalizeImageDownloadLimit(els.imageMaxDownloadSize.value) }
+  saveImageStorage()
+  renderImageStorageSettings()
+})
 renderImageStorageSettings()
+
+const localizingRemoteImages = new Set<string>()
+
+function remoteImageUrlsInMarkdown(markdown: string): string[] {
+  const urls: string[] = []
+  const pattern = /!\[[^\]\r\n]*\]\(\s*<?(https?:\/\/[^)\s>]+)>?(?:\s+["'][^)]*)?\)/gi
+  for (const match of markdown.matchAll(pattern)) urls.push(match[1])
+  return [...new Set(urls)]
+}
+
+function replaceRemoteImageUrl(markdown: string, remoteUrl: string, localPath: string): string {
+  const pattern = /(!\[[^\]\r\n]*\]\(\s*<?)(https?:\/\/[^)\s>]+)(>?\s*(?:["'][^)]*)?\))/gi
+  return markdown.replace(pattern, (whole, prefix: string, url: string, suffix: string) => (
+    url === remoteUrl ? `${prefix}${localPath}${suffix}` : whole
+  ))
+}
+
+async function localizeRemoteImages(urls: string[]) {
+  if (!state.openPath || !urls.length) return
+  const documentPath = state.openPath
+  const storage = { ...imageStorage }
+  for (const url of [...new Set(urls)]) {
+    const key = `${documentPath}\n${url}`
+    if (localizingRemoteImages.has(key)) continue
+    localizingRemoteImages.add(key)
+    try {
+      const res = await window.api.downloadImage(url, documentPath, storage)
+      if (state.openPath !== documentPath) continue
+      const localPath = encodeMarkdownPath(relativeFrom(dirname(documentPath), res.abs))
+      if (editorMode === 'source') {
+        const next = replaceRemoteImageUrl(els.sourceEditor.value, url, localPath)
+        if (next !== els.sourceEditor.value) {
+          els.sourceEditor.value = next
+          els.sourceEditor.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      } else {
+        editorCtl.replaceImageSource(url, localPath)
+      }
+      setStatus(`已本地化图片 ${res.displayPath}`)
+    } catch (error) {
+      setStatus(`图片本地化失败：${error instanceof Error ? error.message : String(error)}`, true)
+    } finally {
+      localizingRemoteImages.delete(key)
+    }
+  }
+}
 
 async function saveImageFiles(files: File[]) {
   if (!state.root || !state.openPath) return
@@ -791,6 +860,7 @@ window.api.onFsChanged(() => {
           els.sourceEditor.value = md
           lastSaved = md
           updateCount()
+          void localizeRemoteImages(editorCtl.remoteImageSources())
         }
       } catch { /* 文件可能刚被删除 */ }
     }

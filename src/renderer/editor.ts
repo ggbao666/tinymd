@@ -13,6 +13,7 @@ import { createSlashMenu, slashGlyph, slashIcons } from './slash'
 export interface EditorCallbacks {
   onChange(): void
   onImageFiles(files: File[]): void
+  onRemoteImages(urls: string[]): void
   onOpenLink(url: string): void
   onPickImage(): void
   onViewImage(src: string, displaySrc: string): void
@@ -148,7 +149,17 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         return false
       },
     },
-    onUpdate: () => cb.onChange(),
+    onUpdate: () => {
+      cb.onChange()
+      const urls: string[] = []
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'image' && /^https?:\/\//i.test(String(node.attrs.src || ''))) {
+          urls.push(String(node.attrs.src))
+        }
+        return true
+      })
+      if (urls.length) cb.onRemoteImages([...new Set(urls)])
+    },
   })
 
   slash = createSlashMenu(editor, [
@@ -264,6 +275,28 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     redo() { editor.chain().focus().redo().run() },
     insertImage(src: string, alt: string) {
       editor.chain().focus().setImage({ src, alt }).run()
+    },
+    remoteImageSources(): string[] {
+      const urls: string[] = []
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'image' && /^https?:\/\//i.test(String(node.attrs.src || ''))) {
+          urls.push(String(node.attrs.src))
+        }
+        return true
+      })
+      return [...new Set(urls)]
+    },
+    replaceImageSource(from: string, to: string): boolean {
+      let changed = false
+      let tr = editor.state.tr
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'image' || String(node.attrs.src || '') !== from) return true
+        tr = tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: to })
+        changed = true
+        return true
+      })
+      if (changed) editor.view.dispatch(tr)
+      return changed
     },
     /** 删除当前选中的图片节点（右键菜单用） */
     deleteSelectedImage(): boolean {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, protocol, nativeTheme } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, protocol, nativeTheme, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
@@ -132,6 +132,44 @@ function createWindow() {
   if (isDev) win.webContents.on('console-message', (_e, _level, message) => console.log('[renderer]', message))
 
   win.on('closed', () => { win = null })
+}
+
+function imageStorageDirectory(documentPath, storage) {
+  assertInside(documentPath)
+  const documentDir = path.dirname(documentPath)
+  const mode = storage?.mode
+  let dir
+  if (mode === 'custom') {
+    if (!storage.directory || !path.isAbsolute(storage.directory)) throw new Error('尚未指定图片存储目录')
+    dir = path.resolve(storage.directory)
+    allowedRoots.add(dir)
+  } else if (mode === 'document-assets') {
+    const documentName = path.basename(documentPath, path.extname(documentPath)) || 'document'
+    dir = path.join(documentDir, `assets.${documentName}`)
+  } else {
+    dir = path.join(documentDir, 'assets')
+  }
+  return { dir, documentDir }
+}
+
+function downloadedImageName(mime) {
+  const ext = ({
+    'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp',
+    'image/svg+xml': '.svg', 'image/avif': '.avif', 'image/bmp': '.bmp', 'image/x-icon': '.ico',
+  })[mime] || '.png'
+  const d = new Date()
+  const pad = (n, size = 2) => String(n).padStart(size, '0')
+  return `image${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${pad(d.getMilliseconds(), 3)}${ext}`
+}
+
+async function writeImage(fileName, data, documentPath, storage) {
+  const { dir, documentDir } = imageStorageDirectory(documentPath, storage)
+  await fsp.mkdir(dir, { recursive: true })
+  const ext = (path.extname(fileName || '') || '.png').toLowerCase()
+  const base = (path.basename(fileName || '', path.extname(fileName || '')).replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)) || 'image'
+  const p = await uniquePath(dir, base, ext, '')
+  await fsp.writeFile(p, Buffer.from(data))
+  return { abs: p, displayPath: path.relative(documentDir, p).split(path.sep).join('/') }
 }
 
 function createImageViewer(parent, src, title) {
@@ -328,26 +366,25 @@ function registerIpc() {
 
   ipcMain.handle('img:save', async (_e, fileName, data, documentPath, storage) => {
     if (!currentRoot) throw new Error('尚未打开工作空间')
+    return writeImage(fileName, data, documentPath, storage)
+  })
+
+  ipcMain.handle('img:download', async (_e, url, documentPath, storage) => {
+    if (!currentRoot) throw new Error('尚未打开工作空间')
+    if (!/^https?:\/\//i.test(String(url))) throw new Error('只支持下载 HTTP(S) 图片')
     assertInside(documentPath)
-    const documentDir = path.dirname(documentPath)
-    const mode = storage?.mode
-    let dir
-    if (mode === 'custom') {
-      if (!storage.directory || !path.isAbsolute(storage.directory)) throw new Error('尚未指定图片存储目录')
-      dir = path.resolve(storage.directory)
-      allowedRoots.add(dir)
-    } else if (mode === 'document-assets') {
-      const documentName = path.basename(documentPath, path.extname(documentPath)) || 'document'
-      dir = path.join(documentDir, `assets.${documentName}`)
-    } else {
-      dir = path.join(documentDir, 'assets')
-    }
-    await fsp.mkdir(dir, { recursive: true })
-    const ext = (path.extname(fileName || '') || '.png').toLowerCase()
-    const base = (path.basename(fileName || '', path.extname(fileName || '')).replace(/[\\/:*?"<>|]/g, '-').slice(0, 60)) || 'image'
-    const p = await uniquePath(dir, base, ext)
-    await fsp.writeFile(p, Buffer.from(data))
-    return { abs: p, displayPath: path.relative(documentDir, p).split(path.sep).join('/') }
+    const response = await net.fetch(String(url), { redirect: 'follow' })
+    if (!response.ok) throw new Error(`图片下载失败 (${response.status})`)
+    const mime = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+    if (!mime.startsWith('image/')) throw new Error('网络地址返回的不是图片')
+    const requestedLimit = Math.round(Number(storage?.maxDownloadSizeMB))
+    const limitMB = Number.isFinite(requestedLimit) && requestedLimit >= 1 ? Math.min(1024, requestedLimit) : 30
+    const limitBytes = limitMB * 1024 * 1024
+    const declaredSize = Number(response.headers.get('content-length') || 0)
+    if (declaredSize > limitBytes) throw new Error(`图片超过 ${limitMB} MB 限制`)
+    const data = new Uint8Array(await response.arrayBuffer())
+    if (data.byteLength > limitBytes) throw new Error(`图片超过 ${limitMB} MB 限制`)
+    return writeImage(downloadedImageName(mime), data, documentPath, storage)
   })
 
   ipcMain.handle('ui:openExternal', (_e, url) => {
