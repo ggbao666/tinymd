@@ -17,6 +17,7 @@ fileAssociations:
     role: Editor
 win:
   target: nsis
+  executableName: tinymd-app
   icon: build/icon.ico
 nsis:
   perMachine: false
