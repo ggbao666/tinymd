@@ -8,13 +8,14 @@
   "license": "MIT",
   "private": true,
   "scripts": {
+    "build:icon": "node build/apply_icon.mjs 03",
     "dev": "concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "dist": "npm run build && electron-builder",
     "dist:win": "vite build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win",
-    "unpack": "vite build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
+    "unpack": "npm run build:icon && vite build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
   },
   "dependencies": {
     "@tiptap/core": "^3.31.3",

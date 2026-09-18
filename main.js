@@ -5,7 +5,9 @@ const fsp = fs.promises
 
 const isDev = !app.isPackaged
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || ''
-const APP_ICON = path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
+// Let Electron scale the high-resolution PNG for the window/taskbar icon.
+// The multi-size ICO remains configured in electron-builder for the exe.
+const APP_ICON = path.join(__dirname, 'build', 'icon.png')
 const MD_RE = /\.(md|markdown|mdown|mkd)$/i
 const IGNORED = new Set(['.git', 'node_modules', '.svn', '.idea', '.vscode', '.DS_Store', 'Thumbs.db', 'desktop.ini'])
 const MIME = {
