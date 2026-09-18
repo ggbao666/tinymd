@@ -25,6 +25,9 @@ const els = {
   editorEmpty: $('#editor-empty'),
   editorWrap: $('#editor-wrap'),
   editor: $('#editor'),
+  sourceWrap: $('#source-wrap'),
+  sourceEditor: $('#source-editor') as HTMLTextAreaElement,
+  sourceModeButton: $('#btn-source-mode') as HTMLButtonElement,
   count: $('#count'),
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
@@ -42,6 +45,8 @@ const state = {
   openPath: null as string | null,
   dirty: false,
 }
+type EditorMode = 'visual' | 'source'
+let editorMode: EditorMode = 'visual'
 let lastSaved = ''
 let saveTimer: number | undefined
 
@@ -169,6 +174,10 @@ function setStatus(text: string, isError = false) {
 
 // ---------- save ----------
 
+function currentDocumentText(): string {
+  return editorMode === 'source' ? els.sourceEditor.value : editorCtl.getMarkdown()
+}
+
 function scheduleSave() {
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => void doSave(), 600)
@@ -177,7 +186,7 @@ function scheduleSave() {
 async function doSave() {
   clearTimeout(saveTimer)
   if (!state.openPath || !state.dirty) return
-  const md = editorCtl.getMarkdown()
+  const md = currentDocumentText()
   if (md === lastSaved) { state.dirty = false; updateBreadcrumb(); return }
   try {
     await window.api.write(state.openPath, md)
@@ -196,7 +205,7 @@ async function flushSave() {
 }
 
 window.addEventListener('beforeunload', () => {
-  if (state.dirty && state.openPath) window.api.flush(state.openPath, editorCtl.getMarkdown())
+  if (state.dirty && state.openPath) window.api.flush(state.openPath, currentDocumentText())
 })
 
 // ---------- open file / workspace ----------
@@ -207,6 +216,9 @@ async function openFile(path: string) {
   try {
     const md = await window.api.read(path)
     editorCtl.open(md, dirname(path))
+    els.sourceEditor.value = md
+    // 文本模式只作用于当前查看；切换到任意文档时恢复所见即所得。
+    editorMode = 'visual'
     state.openPath = path
     lastSaved = md
     state.dirty = false
@@ -216,6 +228,7 @@ async function openFile(path: string) {
     updateCount()
     document.title = `${basename(path)} — ${basename(state.root || '')}`
     els.editorWrap.scrollTop = 0
+    els.sourceEditor.scrollTop = 0
   } catch (e) {
     setStatus('无法打开文件', true)
   }
@@ -251,15 +264,19 @@ async function closeWorkspace() {
 
 function showEditor() {
   els.editorEmpty.classList.add('hidden')
-  els.editorWrap.classList.remove('hidden')
+  els.editorWrap.classList.toggle('hidden', editorMode !== 'visual')
+  els.sourceWrap.classList.toggle('hidden', editorMode !== 'source')
   els.count.classList.remove('hidden')
+  updateEditorModeButton()
   renderOutline()
 }
 
 function showEditorEmpty() {
   state.openPath = null
   els.editorWrap.classList.add('hidden')
+  els.sourceWrap.classList.add('hidden')
   els.count.classList.add('hidden')
+  updateEditorModeButton()
   els.editorEmpty.classList.remove('hidden')
   renderOutline()
   updateBreadcrumb()
@@ -287,8 +304,66 @@ function updateBreadcrumb() {
 }
 
 function updateCount() {
-  els.count.textContent = editorCtl.wordCountText()
+  if (editorMode === 'visual') {
+    els.count.textContent = editorCtl.wordCountText()
+  } else {
+    const count = els.sourceEditor.value.length
+    els.count.textContent = count ? `${count.toLocaleString('zh-Hans-CN')} 字符` : ''
+  }
 }
+
+// ---------- visual / source mode ----------
+
+function updateEditorModeButton() {
+  const source = editorMode === 'source'
+  els.sourceModeButton.disabled = !state.openPath
+  els.sourceModeButton.classList.toggle('active', source)
+  els.sourceModeButton.setAttribute('aria-pressed', String(source))
+  els.sourceModeButton.title = source ? '切换到编辑模式' : '切换到纯文本模式'
+  els.sourceModeButton.setAttribute('aria-label', els.sourceModeButton.title)
+}
+
+function setEditorMode(mode: EditorMode) {
+  if (!state.openPath || mode === editorMode) return
+  if (mode === 'source') {
+    els.sourceEditor.value = state.dirty ? editorCtl.getMarkdown() : lastSaved
+    state.dirty = els.sourceEditor.value !== lastSaved
+  } else {
+    const markdown = els.sourceEditor.value
+    // 纯文本是切回后的唯一数据源，整篇重新解析，避免两种编辑状态不一致。
+    editorCtl.open(markdown, dirname(state.openPath))
+    state.dirty = markdown !== lastSaved
+  }
+  editorMode = mode
+  showEditor()
+  updateBreadcrumb()
+  updateCount()
+  requestAnimationFrame(() => {
+    if (mode === 'source') els.sourceEditor.focus()
+    else editorCtl.focus()
+  })
+}
+
+els.sourceModeButton.addEventListener('click', () => {
+  setEditorMode(editorMode === 'visual' ? 'source' : 'visual')
+})
+
+els.sourceEditor.addEventListener('input', () => {
+  state.dirty = els.sourceEditor.value !== lastSaved
+  setStatus(state.dirty ? '编辑中…' : '已保存')
+  updateBreadcrumb()
+  updateCount()
+  if (state.dirty) scheduleSave()
+  else clearTimeout(saveTimer)
+})
+
+els.sourceEditor.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab') return
+  event.preventDefault()
+  const start = els.sourceEditor.selectionStart
+  els.sourceEditor.setRangeText('  ', start, els.sourceEditor.selectionEnd, 'end')
+  els.sourceEditor.dispatchEvent(new Event('input', { bubbles: true }))
+})
 
 // ---------- outline（文档大纲） ----------
 
@@ -299,7 +374,7 @@ function scheduleOutline() {
 }
 
 function renderOutline() {
-  const items = state.openPath ? editorCtl.getOutline() : []
+  const items = state.openPath && editorMode === 'visual' ? editorCtl.getOutline() : []
   els.outline.innerHTML = ''
   if (!items.length) return
   for (const it of items) {
@@ -609,7 +684,7 @@ function renderRecents() {
 // ---------- link popover ----------
 
 function openLinkPopover() {
-  if (!state.openPath) return
+  if (!state.openPath || editorMode === 'source') return
   els.linkInput.value = editorCtl.currentLink() || ''
   els.linkPopover.classList.remove('hidden')
   els.linkInput.focus()
@@ -687,8 +762,14 @@ window.api.onMenu(async (action) => {
     case 'new-file': if (state.root) await createEntry(state.root, 'file'); break
     case 'save': await doSave(); break
     case 'close-workspace': await closeWorkspace(); break
-    case 'undo': editorCtl.undo(); break
-    case 'redo': editorCtl.redo(); break
+    case 'undo':
+      if (editorMode === 'source') { els.sourceEditor.focus(); document.execCommand('undo') }
+      else editorCtl.undo()
+      break
+    case 'redo':
+      if (editorMode === 'source') { els.sourceEditor.focus(); document.execCommand('redo') }
+      else editorCtl.redo()
+      break
     case 'link': openLinkPopover(); break
     case 'toggle-sidebar': toggleSidebar(); break
   }
@@ -707,6 +788,7 @@ window.api.onFsChanged(() => {
         const md = await window.api.read(state.openPath)
         if (md !== lastSaved) {
           editorCtl.open(md, dirname(state.openPath))
+          els.sourceEditor.value = md
           lastSaved = md
           updateCount()
         }

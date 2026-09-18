@@ -220,6 +220,8 @@ body.win #topbar { padding-right: 146px; }
 }
 .icon-btn:hover { background: var(--hover); color: var(--text); }
 .icon-btn:active { background: var(--active); }
+.icon-btn.active { color: var(--accent); background: var(--accent-soft); }
+.icon-btn:disabled { opacity: 0.38; cursor: default; background: transparent; }
 .icon-btn svg { width: 16px; height: 16px; }
 .icon-btn.small { width: 24px; height: 24px; border-radius: 6px; }
 .icon-btn.small svg { width: 13px; height: 13px; }
@@ -810,6 +812,34 @@ body.side-outline #tree { display: none; }
   border-radius: 5px;
   padding: 0.12em 0.38em;
 }
+
+#source-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#source-editor {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 48px max(48px, calc((100% - 640px) / 2)) 34vh;
+  resize: none;
+  outline: none;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.65;
+  tab-size: 2;
+  caret-color: var(--accent);
+}
+#source-editor:focus { border: 0; box-shadow: none; }
+#source-editor::placeholder { color: var(--text-3); }
+#source-editor::-webkit-scrollbar-corner { background: transparent; }
 
 .ProseMirror pre {
   background: var(--code-bg);

@@ -37,6 +37,9 @@
         </div>
         <div class="topbar-right">
           <span id="status"></span>
+          <button id="btn-source-mode" class="icon-btn" title="切换到纯文本模式" aria-label="切换到纯文本模式" aria-pressed="false">
+            <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 4.5-4 4.5 4 4.5M11.5 4.5l4 4.5-4 4.5M10.2 3.2 7.8 14.8"/></svg>
+          </button>
           <button id="btn-image-settings" class="icon-btn" title="设置" aria-label="设置" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
@@ -81,6 +84,9 @@
             </div>
           </div>
           <div id="editor-wrap" class="hidden"><div id="editor"></div></div>
+          <div id="source-wrap" class="hidden">
+            <textarea id="source-editor" aria-label="Markdown 纯文本编辑器" placeholder="在这里编辑 Markdown 源文本…" spellcheck="false" wrap="off"></textarea>
+          </div>
           <div id="count" class="hidden"></div>
         </main>
       </div>
