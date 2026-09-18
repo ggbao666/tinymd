@@ -7,6 +7,7 @@ files:
   - preload.cjs
   - dist/renderer/**/*
   - build/icon.png
+  - build/icon.ico
   - package.json
 fileAssociations:
   - ext: md
@@ -17,7 +18,6 @@ fileAssociations:
     role: Editor
 win:
   target: nsis
-  executableName: tinymd-app
   icon: build/icon.ico
 nsis:
   perMachine: false

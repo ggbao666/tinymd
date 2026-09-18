@@ -5,8 +5,7 @@ const fsp = fs.promises
 
 const isDev = !app.isPackaged
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || ''
-const APP_ICON = path.join(__dirname, 'build', 'icon.png')
-if (process.platform === 'win32') app.setAppUserModelId('com.jianmo.editor')
+const APP_ICON = path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
 const MD_RE = /\.(md|markdown|mdown|mkd)$/i
 const IGNORED = new Set(['.git', 'node_modules', '.svn', '.idea', '.vscode', '.DS_Store', 'Thumbs.db', 'desktop.ini'])
 const MIME = {
@@ -124,6 +123,7 @@ function createWindow() {
   })
 
   if (process.platform === 'win32') {
+    win.setIcon(APP_ICON)
     win.setAutoHideMenuBar(true)
     win.setMenuBarVisibility(false)
   }
@@ -205,6 +205,7 @@ function createImageViewer(parent, src, title) {
   })
 
   const viewerId = viewer.webContents.id
+  if (process.platform === 'win32') viewer.setIcon(APP_ICON)
   imageViewerWindows.add(viewer)
   imageViewerData.set(viewerId, { src, title })
   viewer.setMenuBarVisibility(false)
