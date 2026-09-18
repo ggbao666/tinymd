@@ -20,6 +20,9 @@ win:
   icon: build/icon.ico
 nsis:
   perMachine: false
+  artifactName: tinymd-${version}-setup.${ext}
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
 mac:
   target: dmg
   category: public.app-category.productivity
