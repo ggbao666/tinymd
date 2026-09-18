@@ -40,5 +40,6 @@ for (let index = 0; index < imageCount; index += 1) {
   }
   writeFileSync(join(sizeDirectory, `${size}.png`), image)
 }
+copyFileSync(join(sizeDirectory, '32.png'), join(root, 'build', 'icon-window.png'))
 
 console.log(`Applied icon candidate ${candidate} with Electron Builder's standard ICO converter.`)

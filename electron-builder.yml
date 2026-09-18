@@ -8,6 +8,7 @@ files:
   - dist/renderer/**/*
   - build/icon.png
   - build/icon.ico
+  - build/icon-window.png
   - package.json
 fileAssociations:
   - ext: md
