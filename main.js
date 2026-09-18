@@ -5,6 +5,7 @@ const fsp = fs.promises
 
 const isDev = !app.isPackaged
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || ''
+const APP_ICON = path.join(__dirname, 'build', 'icon.png')
 const MD_RE = /\.(md|markdown|mdown|mkd)$/i
 const IGNORED = new Set(['.git', 'node_modules', '.svn', '.idea', '.vscode', '.DS_Store', 'Thumbs.db', 'desktop.ini'])
 const MIME = {
@@ -106,6 +107,7 @@ function createWindow() {
     minHeight: 540,
     show: false,
     title: 'tinymd',
+    icon: APP_ICON,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e20' : '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     titleBarOverlay: process.platform === 'win32'
@@ -184,6 +186,7 @@ function createImageViewer(parent, src, title) {
     minHeight: 400,
     show: false,
     title,
+    icon: APP_ICON,
     backgroundColor: '#202124',
     autoHideMenuBar: true,
     ...(parent && !parent.isDestroyed() ? { parent } : {}),

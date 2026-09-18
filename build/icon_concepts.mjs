@@ -3,10 +3,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const shell = (bg, tile, body) => `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
+const shell = (bg, tile, body, transparent = false) => `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
   <defs><filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#111318" flood-opacity=".34"/></filter></defs>
-  <rect width="1024" height="1024" fill="${bg}"/>
-  <rect x="92" y="92" width="840" height="840" rx="210" fill="${tile}" filter="url(#s)"/>
+${transparent ? '' : `  <rect width="1024" height="1024" fill="${bg}"/>\n`}  <rect x="92" y="92" width="840" height="840" rx="210" fill="${tile}"${transparent ? '' : ' filter="url(#s)"'}/>
   ${body}
 </svg>`
 
@@ -25,7 +24,7 @@ const icons = [
   shell('#374247', '#405057', `
     <path d="M236 278h188l88 164 88-164h188v468H650V480L520 674h-16L374 480v266H236z" fill="#ebeae4"/>
     <path d="M424 278l88 164v232h-8L374 480z" fill="#c5cbc8"/>
-    <path d="M512 442l88-164 50 202-130 194h-8z" fill="#79a99b"/>`),
+    <path d="M512 442l88-164 50 202-130 194h-8z" fill="#79a99b"/>`, true),
   shell('#3f4652', '#48515f', `
     <g filter="url(#s)"><rect x="218" y="202" width="588" height="620" rx="82" fill="#e9e8e2"/></g>
     <g fill="#a9adb0"><rect x="322" y="366" width="330" height="38" rx="19"/><rect x="322" y="478" width="408" height="38" rx="19"/><rect x="322" y="590" width="270" height="38" rx="19"/><rect x="322" y="682" width="226" height="38" rx="19"/></g>

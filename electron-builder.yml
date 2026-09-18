@@ -6,6 +6,7 @@ files:
   - main.js
   - preload.cjs
   - dist/renderer/**/*
+  - build/icon.png
   - package.json
 fileAssociations:
   - ext: md

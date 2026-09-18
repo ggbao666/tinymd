@@ -71,15 +71,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; bo
 .app-mark {
   width: 84px;
   height: 84px;
-  border-radius: 22px;
-  background: var(--mark-gradient);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   margin-bottom: 22px;
 }
-.app-mark svg { width: 58px; height: 58px; }
+.app-mark svg { width: 84px; height: 84px; display: block; }
 
 .welcome-inner h1 {
   font-size: 28px;

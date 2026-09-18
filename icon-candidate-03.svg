@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
   <defs><filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#111318" flood-opacity=".34"/></filter></defs>
-  <rect width="1024" height="1024" fill="#374247"/>
-  <rect x="92" y="92" width="840" height="840" rx="210" fill="#405057" filter="url(#s)"/>
+  <rect x="92" y="92" width="840" height="840" rx="210" fill="#405057"/>
   
     <path d="M236 278h188l88 164 88-164h188v468H650V480L520 674h-16L374 480v266H236z" fill="#ebeae4"/>
     <path d="M424 278l88 164v232h-8L374 480z" fill="#c5cbc8"/>
