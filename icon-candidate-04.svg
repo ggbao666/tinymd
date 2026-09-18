@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
+  <defs><filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#111318" flood-opacity=".34"/></filter></defs>
+  <rect width="1024" height="1024" fill="#3f4652"/>
+  <rect x="92" y="92" width="840" height="840" rx="210" fill="#48515f" filter="url(#s)"/>
+  
+    <g filter="url(#s)"><rect x="218" y="202" width="588" height="620" rx="82" fill="#e9e8e2"/></g>
+    <g fill="#a9adb0"><rect x="322" y="366" width="330" height="38" rx="19"/><rect x="322" y="478" width="408" height="38" rx="19"/><rect x="322" y="590" width="270" height="38" rx="19"/><rect x="322" y="682" width="226" height="38" rx="19"/></g>
+    <rect x="584" y="324" width="36" height="318" rx="18" fill="#ce725f"/>
+</svg>

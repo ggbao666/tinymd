@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
+  <defs><filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#111318" flood-opacity=".34"/></filter></defs>
+  <rect width="1024" height="1024" fill="#474640"/>
+  <rect x="92" y="92" width="840" height="840" rx="210" fill="#535149" filter="url(#s)"/>
+  
+    <rect x="284" y="234" width="506" height="480" rx="74" fill="#b7b6af"/>
+    <rect x="234" y="304" width="506" height="486" rx="74" fill="#eceae3"/>
+    <g fill="#686961"><rect x="334" y="424" width="298" height="42" rx="21"/><rect x="334" y="534" width="312" height="42" rx="21"/></g>
+    <rect x="334" y="644" width="204" height="42" rx="21" fill="#c48661"/>
+</svg>
