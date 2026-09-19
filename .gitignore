@@ -20,3 +20,6 @@ Desktop.ini
 
 # 示例工作区(本地留用，整个目录不入库)
 sample-workspace/
+
+# apply_icon.mjs 生成的中间尺寸图标（可随时重建）
+build/icon-sizes-*/
