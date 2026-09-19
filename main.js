@@ -402,6 +402,17 @@ function registerIpc() {
     return false
   })
 
+  // 右键菜单里的剪切 / 复制 / 粘贴：走 webContents 原生实现，比 execCommand 可靠
+  ipcMain.handle('ui:clipboard', (e, action) => {
+    const wc = e.sender
+    if (wc.isDestroyed()) return false
+    if (action === 'cut') wc.cut()
+    else if (action === 'copy') wc.copy()
+    else if (action === 'paste') wc.paste()
+    else return false
+    return true
+  })
+
   ipcMain.handle('ui:imageViewer', (e, { src, title }) => (
     createImageViewer(BrowserWindow.fromWebContents(e.sender), src, title)
   ))

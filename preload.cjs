@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 const on = (channel, cb) => {
   const handler = (_e, data) => cb(data)
@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('api', {
   downloadImage: (url, documentPath, storage) => ipcRenderer.invoke('img:download', url, documentPath, storage),
 
   openExternal: (url) => ipcRenderer.invoke('ui:openExternal', url),
+  clipboard: (action) => ipcRenderer.invoke('ui:clipboard', action),
+  pathForFile: (file) => { try { return webUtils.getPathForFile(file) || '' } catch { return '' } },
   popupMenu: (items, x, y) => ipcRenderer.invoke('ui:menu', { items, x, y }),
   setTheme: (mode) => ipcRenderer.invoke('ui:theme', mode),
   openImageViewer: (src, title) => ipcRenderer.invoke('ui:imageViewer', { src, title }),

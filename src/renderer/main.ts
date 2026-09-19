@@ -7,6 +7,8 @@ import { basename, dirname, encodeMarkdownPath, imageFileName, relativeFrom, res
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
+const MD_RE = /\.(md|markdown|mdown|mkd)$/i
+
 const els = {
   welcome: $('#view-welcome'),
   btnOpenFolder: $('#btn-open-folder'),
@@ -113,8 +115,13 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
       label: (active.has(id) ? '✓ ' : '') + label,
       hint,
     })
+    const mod = window.api.platform === 'darwin' ? '⌘' : 'Ctrl+'
     const id = await showContextMenu(
       [
+        { id: 'cut', label: '剪切', hint: mod + 'X' },
+        { id: 'copy', label: '复制', hint: mod + 'C' },
+        { id: 'paste', label: '粘贴', hint: mod + 'V' },
+        '-',
         mark('bold', '加粗', '**粗体**'),
         mark('italic', '斜体', '*斜体*'),
         mark('code', '行内代码', '`代码`'),
@@ -123,7 +130,13 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
       x,
       y,
     )
-    if (id) editorCtl.textMark(id)
+    if (id === 'cut' || id === 'copy' || id === 'paste') {
+      // 确保焦点在编辑器内（保持当前选区），webContents 原生动作才能作用于选中文本
+      editorCtl.focus()
+      void window.api.clipboard(id)
+    } else if (id) {
+      editorCtl.textMark(id)
+    }
   },
   async onTableContext(x: number, y: number) {
     const id = await showContextMenu(
@@ -871,6 +884,24 @@ window.api.onFsChanged(() => {
 
 window.api.onOpenFile((p) => {
   if (p) void openWorkspace(dirname(p), p)
+})
+
+// ---------- drag & drop（拖入 Markdown 文件直接打开） ----------
+
+// 窗口层兜底 preventDefault：否则从资源管理器拖入文件会触发浏览器默认行为（整页导航）
+window.addEventListener('dragover', (e) => e.preventDefault())
+window.addEventListener('drop', (e) => {
+  e.preventDefault()
+  const first = Array.from(e.dataTransfer?.files || [])[0]
+  if (!first) return
+  const path = window.api.pathForFile(first)
+  if (!path) return
+  if (MD_RE.test(path)) {
+    void openWorkspace(dirname(path), path)
+  } else if (!first.type.startsWith('image/')) {
+    // 图片由编辑区的 handleDrop 处理；其余类型明确告知不支持
+    setStatus('只能拖入 Markdown 文件（.md）打开', true)
+  }
 })
 
 // ---------- boot ----------

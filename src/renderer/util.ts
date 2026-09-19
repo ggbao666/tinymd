@@ -117,6 +117,8 @@ export interface Api {
   saveImage(fileName: string, data: Uint8Array, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
   downloadImage(url: string, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
   openExternal(url: string): Promise<boolean>
+  clipboard(action: 'cut' | 'copy' | 'paste'): Promise<boolean>
+  pathForFile(file: File): string
   popupMenu(items: (PopupItem | '-')[], x: number, y: number): Promise<string | null>
   setTheme(mode: 'system' | 'light' | 'neutral' | 'dark'): Promise<boolean>
   openImageViewer(src: string, title: string): Promise<boolean>
