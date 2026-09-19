@@ -3,6 +3,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
+import { BubbleMenu } from '@tiptap/extension-bubble-menu'
 import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
 import type { Node as PMNode } from '@tiptap/pm/model'
@@ -20,6 +21,8 @@ export interface EditorCallbacks {
   onImageContext(x: number, y: number, src: string, displaySrc: string): void
   onTextContext(x: number, y: number): void
   onTableContext(x: number, y: number): void
+  /** 气泡菜单点「链接」→ 打开链接编辑浮层 */
+  onRequestLink(): void
 }
 
 /** 方向键遇到块级图片（两段式）：第一次选中图片（高亮可见），第二次跳到图片上/下方的文本 */
@@ -92,6 +95,11 @@ const CodeBlockBackspace = Extension.create({
 })
 
 export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
+  // 气泡菜单元素在 index.html 中静态声明；显隐由插件用 visibility 控制，
+  // 必须摘掉 hidden class（display:none 会永久压制插件）
+  const bubbleEl = document.getElementById('bubble-menu') as HTMLElement
+  bubbleEl.classList.remove('hidden')
+
   const editor = new Editor({
     element: host,
     extensions: [
@@ -109,6 +117,15 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       TableCell,
       Placeholder.configure({ placeholder: '开始写点什么…' }),
       Markdown.configure({ indentation: { style: 'space', size: 2 } }),
+      BubbleMenu.configure({
+        element: bubbleEl,
+        shouldShow: ({ state, view }) => {
+          // 空选区不弹；代码块内行内格式无意义也不弹
+          if (state.selection.empty || !view.hasFocus()) return false
+          return state.selection.$from.parent.type.name !== 'codeBlock'
+        },
+        options: { placement: 'top', offset: 8 },
+      }),
     ],
     content: '',
     editorProps: {
@@ -176,7 +193,29 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     { icon: slashIcons.image, title: '图片', hint: '插入本地图片（原样存入 assets）', keywords: ['image', 'img', 'photo', 'tupian', 'tp'], run: () => cb.onPickImage() },
   ])
 
-  editor.on('transaction', () => slash?.sync())
+  editor.on('transaction', () => {
+    slash?.sync()
+    // 气泡菜单按钮勾选态跟随当前选区的格式
+    for (const btn of bubbleEl.querySelectorAll<HTMLButtonElement>('button[data-bubble]')) {
+      const mark = btn.dataset.bubble!
+      btn.classList.toggle('active', mark !== 'link' && editor.isActive(mark))
+    }
+  })
+
+  bubbleEl.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-bubble]')
+    if (!btn) return
+    const action = btn.dataset.bubble!
+    if (action === 'link') {
+      cb.onRequestLink()
+      return
+    }
+    const c = editor.chain().focus()
+    if (action === 'bold') c.toggleBold().run()
+    else if (action === 'italic') c.toggleItalic().run()
+    else if (action === 'code') c.toggleCode().run()
+    else if (action === 'strike') c.toggleStrike().run()
+  })
 
   // ⌘/Ctrl + 单击打开链接
   host.addEventListener('click', (e) => {

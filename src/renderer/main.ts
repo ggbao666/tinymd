@@ -22,7 +22,6 @@ const els = {
   tree: $('#tree'),
   outline: $('#outline'),
   wsPath: $('#ws-path'),
-  btnCloseWs: $('#btn-close-ws'),
   content: $('#content'),
   editorEmpty: $('#editor-empty'),
   editorWrap: $('#editor-wrap'),
@@ -31,6 +30,11 @@ const els = {
   sourceEditor: $('#source-editor') as HTMLTextAreaElement,
   sourceModeButton: $('#btn-source-mode') as HTMLButtonElement,
   count: $('#count'),
+  statusPill: $('#status-pill'),
+  docHead: $('#doc-head'),
+  docTitle: $('#doc-title'),
+  docMeta: $('#doc-meta'),
+  btnWsMore: $('#btn-ws-more'),
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
   fileInput: $('#file-input') as HTMLInputElement,
@@ -158,6 +162,9 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
     )
     if (id) editorCtl.tableAction(id)
   },
+  onRequestLink() {
+    openLinkPopover()
+  },
 })
 
 function resolveInside(fromFile: string, rel: string): string | null {
@@ -183,6 +190,8 @@ async function refreshTree() {
 
 let statusTimer: number | undefined
 function setStatus(text: string, isError = false) {
+  // 状态显示在右下角胶囊里（与字数并列）；未打开文档时也要能弹提示
+  els.statusPill.classList.remove('hidden')
   els.status.textContent = text
   els.status.classList.toggle('error', isError)
   clearTimeout(statusTimer)
@@ -240,6 +249,12 @@ async function openFile(path: string) {
     lastSaved = md
     state.dirty = false
     treeCtl.select(path)
+    // Notion 式标题区：大号文档名 + 所在目录
+    els.docTitle.textContent = basename(path).replace(MD_RE, '')
+    const rootPrefix = (state.root ? state.root.replace(/\\/g, '/') : '') + '/'
+    const rel = path.replace(/\\/g, '/').startsWith(rootPrefix) ? path.replace(/\\/g, '/').slice(rootPrefix.length) : basename(path)
+    const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+    els.docMeta.textContent = dir ? `${dir} · Markdown` : 'Markdown'
     showEditor()
     updateBreadcrumb()
     updateCount()
@@ -284,7 +299,8 @@ function showEditor() {
   els.editorEmpty.classList.add('hidden')
   els.editorWrap.classList.toggle('hidden', editorMode !== 'visual')
   els.sourceWrap.classList.toggle('hidden', editorMode !== 'source')
-  els.count.classList.remove('hidden')
+  els.docHead.classList.toggle('hidden', editorMode !== 'visual' || !state.openPath)
+  els.statusPill.classList.remove('hidden')
   updateEditorModeButton()
   renderOutline()
 }
@@ -293,7 +309,8 @@ function showEditorEmpty() {
   state.openPath = null
   els.editorWrap.classList.add('hidden')
   els.sourceWrap.classList.add('hidden')
-  els.count.classList.add('hidden')
+  els.docHead.classList.add('hidden')
+  els.statusPill.classList.add('hidden')
   updateEditorModeButton()
   els.editorEmpty.classList.remove('hidden')
   renderOutline()
@@ -407,15 +424,22 @@ function renderOutline() {
   }
 }
 
-// ---------- sidebar tabs（文件 / 大纲切换） ----------
+// ---------- sidebar tabs（文件 / 大纲切换，滚动位置各自记忆） ----------
 
 const TAB_KEY = 'jianmo.sideTab'
+const sideScroll = { files: 0, outline: 0 }
+els.tree.addEventListener('scroll', () => { sideScroll.files = els.tree.scrollTop })
+els.outline.addEventListener('scroll', () => { sideScroll.outline = els.outline.scrollTop })
+
 function setSideTab(tab: 'files' | 'outline') {
   localStorage.setItem(TAB_KEY, tab)
   document.body.classList.toggle('side-outline', tab === 'outline')
   $('#tab-files').classList.toggle('active', tab === 'files')
   $('#tab-outline').classList.toggle('active', tab === 'outline')
   if (tab === 'outline') renderOutline()
+  // 恢复该面板上次的滚动位置
+  const pane = tab === 'outline' ? els.outline : els.tree
+  pane.scrollTop = sideScroll[tab]
 }
 $('#tab-files').addEventListener('click', () => setSideTab('files'))
 $('#tab-outline').addEventListener('click', () => setSideTab('outline'))
@@ -800,6 +824,31 @@ function toggleSidebar() {
 }
 els.btnSidebar.addEventListener('click', toggleSidebar)
 
+// ---------- 编辑区宽度（窄 / 中 / 宽） ----------
+
+const WIDTH_KEY = 'tinymd.editorWidth'
+type WidthMode = 'narrow' | 'medium' | 'wide'
+
+let editorWidth: WidthMode = (['narrow', 'medium', 'wide'] as const).includes(localStorage.getItem(WIDTH_KEY) as WidthMode)
+  ? (localStorage.getItem(WIDTH_KEY) as WidthMode)
+  : 'medium'
+
+function applyEditorWidth() {
+  document.body.classList.toggle('width-narrow', editorWidth === 'narrow')
+  document.body.classList.toggle('width-wide', editorWidth === 'wide')
+  const radio = document.querySelector<HTMLInputElement>(`input[name="settings-width"][value="${editorWidth}"]`)
+  if (radio) radio.checked = true
+}
+
+document.querySelectorAll<HTMLInputElement>('input[name="settings-width"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    editorWidth = radio.value as WidthMode
+    localStorage.setItem(WIDTH_KEY, editorWidth)
+    applyEditorWidth()
+  })
+})
+applyEditorWidth()
+
 // ---------- sidebar resize（拖拽调宽） ----------
 
 const SIDEBAR_W_KEY = 'jianmo.sidebarWidth'
@@ -823,7 +872,21 @@ document.addEventListener('mouseup', () => {
   document.body.classList.remove('resizing')
   localStorage.setItem(SIDEBAR_W_KEY, els.sidebar.style.width)
 })
-els.btnCloseWs.addEventListener('click', () => void closeWorkspace())
+// 侧栏 footer 的「⋯」菜单：关闭工作空间收进来，footer 更清爽
+els.btnWsMore.addEventListener('click', async (e) => {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const id = await showContextMenu(
+    [
+      { id: 'open-other', label: '打开其他文件夹…' },
+      '-',
+      { id: 'close-ws', label: '关闭工作空间' },
+    ],
+    Math.round(r.left),
+    Math.round(r.bottom + 6),
+  )
+  if (id === 'close-ws') void closeWorkspace()
+  else if (id === 'open-other') chooseAndOpen()
+})
 els.btnOpenFolder.addEventListener('click', chooseAndOpen)
 $('#btn-add-file').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'file') })
 $('#btn-add-folder').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'dir') })

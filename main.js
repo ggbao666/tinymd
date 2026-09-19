@@ -115,8 +115,10 @@ function createWindow() {
     icon: APP_ICON,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e20' : '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    // Windows WCO 不支持透明底色（#00000000 会回退成系统白），
+    // 初始给中性主题底色，渲染层启动后会经 ui:theme 校正
     titleBarOverlay: process.platform === 'win32'
-      ? { height: 44, symbolColor: nativeTheme.shouldUseDarkColors ? '#eaeaeb' : '#1d1d1f' }
+      ? { height: 38, color: '#383a3d', symbolColor: '#eaeaeb' }
       : undefined,
     trafficLightPosition: { x: 16, y: 15 },
     webPreferences: {
@@ -138,6 +140,15 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, 'dist/renderer/index.html'))
 
   if (isDev) win.webContents.on('console-message', (_e, _level, message) => console.log('[renderer]', message))
+
+  // Chromium 会把 file:// 页面的缩放级别持久化（误触 Ctrl+滚轮 / Ctrl+= 后重启依旧放大）。
+  // 每次加载页面后强制回到 100%，缩放只作为会话内临时操作（Ctrl+0 可随时复位）。
+  const resetZoom = () => {
+    if (win && !win.isDestroyed() && Math.abs(win.webContents.getZoomFactor() - 1) > 0.001) {
+      win.webContents.zoomFactor = 1
+    }
+  }
+  win.webContents.on('did-finish-load', resetZoom)
 
   win.on('closed', () => { win = null })
 }
@@ -435,17 +446,27 @@ function registerIpc() {
 
   ipcMain.handle('app:initialFile', () => pendingOpenFile)
 
-  // 渲染层主题切换后同步：原生菜单（nativeTheme）+ Windows 标题栏按钮
   ipcMain.handle('ui:theme', (_e, mode) => {
+    currentThemeMode = mode
     nativeTheme.themeSource = mode === 'dark' || mode === 'neutral' ? 'dark' : mode === 'system' ? 'system' : 'light'
-    if (process.platform === 'win32' && win) {
-      win.setTitleBarOverlay({ color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#eaeaeb' : '#1d1d1f', height: 44 })
+    if (process.platform === 'win32' && win && !win.isDestroyed()) {
+      win.setTitleBarOverlay(overlayFor(mode))
     }
     return true
   })
 }
 
 // ---------- custom protocol for local images ----------
+
+// Windows 标题栏按钮（WCO）主题同步：透明底色在 Windows 上不生效（会回退成白），
+// 必须给与渲染层 --bg 一致的真实底色；currentThemeMode 由 ui:theme 维护
+let currentThemeMode = 'neutral'
+function overlayFor(mode) {
+  const resolved = mode === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : mode
+  const bg = { light: '#ffffff', neutral: '#383a3d', dark: '#1e1e20' }[resolved] || '#383a3d'
+  const dark = resolved === 'dark' || resolved === 'neutral'
+  return { color: bg, symbolColor: dark ? '#eaeaeb' : '#1d1d1f', height: 38 }
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
@@ -502,7 +523,7 @@ if (!gotLock) {
       if (!win || win.isDestroyed()) return
       try {
         win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#1e1e20' : '#ffffff')
-        if (process.platform === 'win32') win.setTitleBarOverlay({ symbolColor: nativeTheme.shouldUseDarkColors ? '#eaeaeb' : '#1d1d1f' })
+        if (process.platform === 'win32') win.setTitleBarOverlay(overlayFor(currentThemeMode))
       } catch { /* ignore */ }
     })
   })

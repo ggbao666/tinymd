@@ -13,9 +13,8 @@ html.theme-dark {
   --accent-soft: rgba(10, 132, 255, 0.12);
   --accent-softer: rgba(10, 132, 255, 0.08);
   --code-bg: rgba(255, 255, 255, 0.07);
-  --inline-code-bg: #303034;
-  --inline-code-text: #ffabb6;
-  --inline-code-border: rgba(255, 255, 255, 0.15);
+  --inline-code-bg: rgba(255, 255, 255, 0.08);
+  --inline-code-text: #f5f5f7;
   --sel: rgba(10, 132, 255, 0.4);
   --danger: #ff453a;
   --mark-gradient: #141416;

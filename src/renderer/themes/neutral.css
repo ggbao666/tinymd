@@ -14,9 +14,8 @@ html.theme-neutral {
   --accent-soft: rgba(10, 132, 255, 0.12);
   --accent-softer: rgba(10, 132, 255, 0.08);
   --code-bg: rgba(255, 255, 255, 0.075);
-  --inline-code-bg: #46484c;
-  --inline-code-text: #ffb1bc;
-  --inline-code-border: rgba(255, 255, 255, 0.14);
+  --inline-code-bg: rgba(255, 255, 255, 0.08);
+  --inline-code-text: #f0f0f1;
   --sel: rgba(10, 132, 255, 0.36);
   --danger: #ff453a;
   --mark-gradient: #25272a;
