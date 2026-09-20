@@ -1,5 +1,7 @@
 import { Editor, Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { common, createLowlight } from 'lowlight'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
@@ -74,6 +76,9 @@ const ResolvedImage = Image.extend({
 let currentDir = ''
 let slash: ReturnType<typeof createSlashMenu> | null = null
 
+/** lowlight 实例（common 语言子集，约 40 种常用语言） */
+const lowlight = createLowlight(common)
+
 /**
  * 代码块起始位置的退格规则：
  * - 非空时吞掉 Backspace，避免代码块与前一段合并或在文档开头被转成段落。
@@ -106,7 +111,10 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       StarterKit.configure({
         link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
         heading: { levels: [1, 2, 3, 4, 5, 6] },
+        // 换成 lowlight 版代码块（语法高亮），语言角标 data-language 行为不变
+        codeBlock: false,
       }),
+      CodeBlockLowlight.configure({ lowlight }),
       CodeBlockBackspace,
       TaskList,
       TaskItem.configure({ nested: true }),

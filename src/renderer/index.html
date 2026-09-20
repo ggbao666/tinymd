@@ -7,6 +7,18 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app-file: data: https: http:; connect-src 'self' ws: http: https:; font-src 'self'"
     />
     <title>tinymd</title>
+    <style>
+      /* 启动兜底：vite 注入完整样式前的首帧保护，避免未样式化内容闪烁（FOUC）。
+         只覆盖首帧可见的关键项，背景色与 main.js 的 backgroundColor 保持一致。 */
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #ffffff; color: #1b1b26; }
+      @media (prefers-color-scheme: dark) { html, body { background: #1e1e20; color: #e8e8ea; } }
+      .hidden { display: none !important; }
+      #view-welcome { height: 100vh; display: flex; align-items: center; justify-content: center; -webkit-app-region: drag; }
+      #view-welcome button, #view-welcome input, #view-welcome .recents { -webkit-app-region: no-drag; }
+      .welcome-inner { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 24px; max-width: 420px; width: 100%; }
+      .app-mark { width: 84px; height: 84px; display: flex; align-items: center; justify-content: center; margin-bottom: 22px; }
+      .app-mark svg { width: 84px; height: 84px; display: block; }
+    </style>
   </head>
   <body>
     <!-- 欢迎页：打开目录才能进入编辑器 -->
@@ -85,10 +97,6 @@
             </div>
           </div>
           <div id="editor-wrap" class="hidden">
-            <div id="doc-head" class="hidden">
-              <h1 id="doc-title"></h1>
-              <div id="doc-meta"></div>
-            </div>
             <div id="editor"></div>
           </div>
           <div id="source-wrap" class="hidden">
@@ -189,6 +197,18 @@
                 <label class="settings-option">
                   <input type="radio" name="settings-theme" value="light" />
                   <span><strong>浅色</strong><small>始终使用浅色界面</small></span>
+                </label>
+                <label class="settings-option">
+                  <input type="radio" name="settings-theme" value="qq" />
+                  <span><strong>经典 QQ</strong><small>WorkBuddy 同款浅蓝界面，清爽通透</small></span>
+                </label>
+                <label class="settings-option">
+                  <input type="radio" name="settings-theme" value="wb-light" />
+                  <span><strong>WorkBuddy 浅色</strong><small>中性灰 + 薄荷绿的官方浅色外观</small></span>
+                </label>
+                <label class="settings-option">
+                  <input type="radio" name="settings-theme" value="wb-dark" />
+                  <span><strong>WorkBuddy 深色</strong><small>深灰底 + 薄荷绿的官方深色外观</small></span>
                 </label>
                 <label class="settings-option">
                   <input type="radio" name="settings-theme" value="neutral" />

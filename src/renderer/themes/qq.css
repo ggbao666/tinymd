@@ -1,0 +1,47 @@
+html.theme-qq {
+  /* 底色：纸白正文区 + 招牌浅蓝侧栏（取自 WorkBuddy「经典 QQ」皮肤真实值：
+     main-area #ffffff / sidebar #e1f3ff / 画布 #f7fcff） */
+  --bg: #ffffff;
+  --bg-sidebar: #e1f3ff;
+
+  /* 文字：深夜蓝三段式（--cb-text-primary / secondary / tertiary） */
+  --text: #06263ce6;
+  --text-2: #06263cb3;
+  --text-3: #06263c80;
+
+  /* 分隔与悬停：浅蓝实色（border-subtle #e0f2fe / bg-hover #d6efff / secondary #ccebff） */
+  --hairline: #e0f2fe;
+  --hairline-strong: #c2e7ff;
+  --hover: #d6efff;
+  --active: #ccebff;
+
+  /* 强调色：QQ 品牌蓝 #0099ff，hover 取 button-primary-bg-hover #0c8bdf */
+  --accent: #0099ff;
+  --accent-hover: #0c8bdf;
+  --accent-soft: #0099ff22;
+  --accent-softer: #0099ff14;
+
+  /* 代码：浅蓝底 + 深夜蓝字（markdown code-block / inline code 均为 #e6f4ff） */
+  --code-bg: #e6f4ff;
+  --inline-code-bg: #e6f4ff;
+  --inline-code-text: #06263ce6;
+
+  /* 语法高亮：WB QQ 皮肤真实值（--wb-code-syntax-*） */
+  --syn-keyword: #8d5d26;
+  --syn-string: #0c4469;
+  --syn-number: #953800;
+  --syn-function: #8250df;
+  --syn-attr: #0969a9;
+
+  --sel: rgba(0, 153, 255, 0.18);
+  --danger: #f64041;
+  --mark-gradient: #141416;
+  color-scheme: light;
+}
+
+/* ---- markdown 组件级对齐（WB「经典 QQ」皮肤细节，变量粒度不够时按组件补齐） ---- */
+html.theme-qq .ProseMirror a { color: #0966a5; }               /* --cb-text-link，比品牌蓝深一档 */
+html.theme-qq .ProseMirror pre { border: 1px solid #e0f2fe; }  /* --cb-markdown-code-block-border */
+html.theme-qq .ProseMirror th { background: #e6f4ff; }         /* --cb-markdown-table-header-bg */
+html.theme-qq .ProseMirror th,
+html.theme-qq .ProseMirror td { border-color: #06263c14; }     /* --cb-markdown-table-border-color */

@@ -120,7 +120,7 @@ export interface Api {
   clipboard(action: 'cut' | 'copy' | 'paste'): Promise<boolean>
   pathForFile(file: File): string
   popupMenu(items: (PopupItem | '-')[], x: number, y: number): Promise<string | null>
-  setTheme(mode: 'system' | 'light' | 'neutral' | 'dark'): Promise<boolean>
+  setTheme(mode: 'system' | 'light' | 'neutral' | 'dark' | 'qq' | 'wb-light' | 'wb-dark'): Promise<boolean>
   openImageViewer(src: string, title: string): Promise<boolean>
   imageViewerData(): Promise<{ src: string; title: string } | null>
   initialFile(): Promise<string | null>

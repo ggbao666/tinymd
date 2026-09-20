@@ -16,6 +16,13 @@ html.theme-neutral {
   --code-bg: rgba(255, 255, 255, 0.075);
   --inline-code-bg: rgba(255, 255, 255, 0.08);
   --inline-code-text: #f0f0f1;
+  /* 语法高亮：GitHub 深色系 */
+  --syn-keyword: #ff7b72;
+  --syn-string: #a5d6ff;
+  --syn-number: #79c0ff;
+  --syn-function: #d2a8ff;
+  --syn-attr: #ffa657;
+
   --sel: rgba(10, 132, 255, 0.36);
   --danger: #ff453a;
   --mark-gradient: #25272a;

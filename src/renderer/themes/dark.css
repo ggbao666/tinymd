@@ -15,6 +15,13 @@ html.theme-dark {
   --code-bg: rgba(255, 255, 255, 0.07);
   --inline-code-bg: rgba(255, 255, 255, 0.08);
   --inline-code-text: #f5f5f7;
+  /* 语法高亮：GitHub 深色系 */
+  --syn-keyword: #ff7b72;
+  --syn-string: #a5d6ff;
+  --syn-number: #79c0ff;
+  --syn-function: #d2a8ff;
+  --syn-attr: #ffa657;
+
   --sel: rgba(10, 132, 255, 0.4);
   --danger: #ff453a;
   --mark-gradient: #141416;

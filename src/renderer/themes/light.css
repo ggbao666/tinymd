@@ -25,6 +25,13 @@ html.theme-light {
   --inline-code-bg: rgba(27, 27, 38, 0.06);
   --inline-code-text: #1b1b1f;
 
+  /* 语法高亮：GitHub 浅色系 */
+  --syn-keyword: #cf222e;
+  --syn-string: #0a3069;
+  --syn-number: #0550ae;
+  --syn-function: #8250df;
+  --syn-attr: #953800;
+
   --sel: rgba(79, 94, 247, 0.2);
   --danger: #e5484d;
   --mark-gradient: #141416;

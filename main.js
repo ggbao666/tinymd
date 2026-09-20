@@ -448,7 +448,7 @@ function registerIpc() {
 
   ipcMain.handle('ui:theme', (_e, mode) => {
     currentThemeMode = mode
-    nativeTheme.themeSource = mode === 'dark' || mode === 'neutral' ? 'dark' : mode === 'system' ? 'system' : 'light'
+    nativeTheme.themeSource = mode === 'dark' || mode === 'neutral' || mode === 'wb-dark' ? 'dark' : mode === 'system' ? 'system' : 'light'
     if (process.platform === 'win32' && win && !win.isDestroyed()) {
       win.setTitleBarOverlay(overlayFor(mode))
     }
@@ -463,8 +463,8 @@ function registerIpc() {
 let currentThemeMode = 'neutral'
 function overlayFor(mode) {
   const resolved = mode === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : mode
-  const bg = { light: '#ffffff', neutral: '#383a3d', dark: '#1e1e20' }[resolved] || '#383a3d'
-  const dark = resolved === 'dark' || resolved === 'neutral'
+  const bg = { light: '#ffffff', neutral: '#383a3d', dark: '#1e1e20', qq: '#ffffff', 'wb-light': '#ffffff', 'wb-dark': '#141414' }[resolved] || '#383a3d'
+  const dark = resolved === 'dark' || resolved === 'neutral' || resolved === 'wb-dark'
   return { color: bg, symbolColor: dark ? '#eaeaeb' : '#1d1d1f', height: 38 }
 }
 

@@ -31,9 +31,6 @@ const els = {
   sourceModeButton: $('#btn-source-mode') as HTMLButtonElement,
   count: $('#count'),
   statusPill: $('#status-pill'),
-  docHead: $('#doc-head'),
-  docTitle: $('#doc-title'),
-  docMeta: $('#doc-meta'),
   btnWsMore: $('#btn-ws-more'),
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
@@ -249,12 +246,6 @@ async function openFile(path: string) {
     lastSaved = md
     state.dirty = false
     treeCtl.select(path)
-    // Notion 式标题区：大号文档名 + 所在目录
-    els.docTitle.textContent = basename(path).replace(MD_RE, '')
-    const rootPrefix = (state.root ? state.root.replace(/\\/g, '/') : '') + '/'
-    const rel = path.replace(/\\/g, '/').startsWith(rootPrefix) ? path.replace(/\\/g, '/').slice(rootPrefix.length) : basename(path)
-    const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
-    els.docMeta.textContent = dir ? `${dir} · Markdown` : 'Markdown'
     showEditor()
     updateBreadcrumb()
     updateCount()
@@ -299,7 +290,6 @@ function showEditor() {
   els.editorEmpty.classList.add('hidden')
   els.editorWrap.classList.toggle('hidden', editorMode !== 'visual')
   els.sourceWrap.classList.toggle('hidden', editorMode !== 'source')
-  els.docHead.classList.toggle('hidden', editorMode !== 'visual' || !state.openPath)
   els.statusPill.classList.remove('hidden')
   updateEditorModeButton()
   renderOutline()
@@ -309,7 +299,6 @@ function showEditorEmpty() {
   state.openPath = null
   els.editorWrap.classList.add('hidden')
   els.sourceWrap.classList.add('hidden')
-  els.docHead.classList.add('hidden')
   els.statusPill.classList.add('hidden')
   updateEditorModeButton()
   els.editorEmpty.classList.remove('hidden')
@@ -445,12 +434,12 @@ $('#tab-files').addEventListener('click', () => setSideTab('files'))
 $('#tab-outline').addEventListener('click', () => setSideTab('outline'))
 setSideTab(localStorage.getItem(TAB_KEY) === 'outline' ? 'outline' : 'files')
 
-// ---------- theme（主题：跟随系统 / 亮 / 中性 / 暗） ----------
+// ---------- theme（主题：跟随系统 / 亮 / 中性 / 暗 / 经典QQ / WB浅 / WB深） ----------
 
 const THEME_KEY = 'jianmo.theme'
-type ThemeMode = 'system' | 'light' | 'neutral' | 'dark'
+type ThemeMode = 'system' | 'light' | 'neutral' | 'dark' | 'qq' | 'wb-light' | 'wb-dark'
 
-let themeMode: ThemeMode = (['system', 'light', 'neutral', 'dark'] as const).includes(localStorage.getItem(THEME_KEY) as ThemeMode)
+let themeMode: ThemeMode = (['system', 'light', 'neutral', 'dark', 'qq', 'wb-light', 'wb-dark'] as const).includes(localStorage.getItem(THEME_KEY) as ThemeMode)
   ? (localStorage.getItem(THEME_KEY) as ThemeMode)
   : 'neutral'
 const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
@@ -461,6 +450,9 @@ function applyTheme() {
   root.classList.toggle('theme-dark', resolved === 'dark')
   root.classList.toggle('theme-light', resolved === 'light')
   root.classList.toggle('theme-neutral', resolved === 'neutral')
+  root.classList.toggle('theme-qq', resolved === 'qq')
+  root.classList.toggle('theme-wb-light', resolved === 'wb-light')
+  root.classList.toggle('theme-wb-dark', resolved === 'wb-dark')
   void window.api.setTheme(themeMode) // 原生右键菜单 + Windows 标题栏按钮跟随
   const settingsRadio = document.querySelector<HTMLInputElement>(`input[name="settings-theme"][value="${themeMode}"]`)
   if (settingsRadio) settingsRadio.checked = true
