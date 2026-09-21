@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
-  <rect width="1024" height="1024" rx="256" fill="#3a4148"/>
-  <g fill="none" stroke="#f4f3ef" stroke-width="74" stroke-linecap="round">
-    <path d="M380 330v370" />
-    <path d="M295 372h150" />
-    <path d="M530 335l100 330" />
-    <path d="M730 335l-135 450" />
-  </g>
-</svg>

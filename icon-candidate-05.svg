@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024" style="display:block">
-  <defs><filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#111318" flood-opacity=".34"/></filter></defs>
-  <rect width="1024" height="1024" fill="#4a444c"/>
-  <rect x="92" y="92" width="840" height="840" rx="210" fill="#554e58" filter="url(#s)"/>
-  
-    <rect x="196" y="248" width="632" height="528" rx="126" fill="#e9e6e0"/>
-    <text x="512" y="615" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="274" font-weight="650" letter-spacing="-20" fill="#47414a">MD</text>
-    <rect x="628" y="664" width="106" height="36" rx="18" fill="#9b7d91"/>
-</svg>
