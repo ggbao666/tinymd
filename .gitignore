@@ -23,3 +23,9 @@ sample-workspace/
 
 # apply_icon.mjs 生成的中间尺寸图标（可随时重建）
 build/icon-sizes-*/
+
+# build/ 下的临时运行日志与校验图（由 npm run clean 清理）
+build/run*.log
+build/run*.txt
+build/render_log.txt
+build/welcome-mark-check.*

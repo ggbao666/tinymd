@@ -8,7 +8,11 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build:icon": "node build/apply_icon.mjs 08",
+    "build:icon": "node build/apply_icon.mjs 25",
+    "clean": "node build/clean.mjs",
+    "clean:build": "node build/clean.mjs --yes",
+    "clean:cache": "node build/clean.mjs --cache --yes",
+    "clean:all": "node build/clean.mjs --all --yes",
     "dev": "concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "vite build",
     "start": "npm run build && electron .",
