@@ -5,6 +5,8 @@ export interface TreeHandlers {
   onOpenFile(path: string): void
   onContext(kind: 'file' | 'dir' | 'root', path: string, x: number, y: number): void
   onRename(oldPath: string, newName: string): void
+  /** 重命名输入框关闭但未发起改名（Escape 取消，或名字没改）时回调 */
+  onRenameSettled?(oldPath: string, committed: boolean): void
 }
 
 const ICONS = {
@@ -16,12 +18,37 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
   let data: TreeNode[] = []
   let selectedPath = ''
   let renamePath: string | null = null
+  /** 重命名输入框里用户已输入的内容：DOM 被重建时用它恢复，避免打的字被吞 */
+  let renameDraft: string | null = null
+  /** 重命名进行中收到的树数据：先挂起，等改名结束再应用，避免输入框被重建冲掉 */
+  let pendingData: TreeNode[] | null = null
   const expanded = new Set<string>()
 
-  function setData(nodes: TreeNode[]) { data = nodes; render() }
-  function select(path: string) { selectedPath = path; render() }
-  function ensureExpanded(path: string) { if (!expanded.has(path)) { expanded.add(path); render() } }
-  function clear() { data = []; selectedPath = ''; renamePath = null; expanded.clear(); render() }
+  function setData(nodes: TreeNode[]) {
+    // 新建文件会触发 fs.watch → 树刷新，若此时重命名输入框在编辑中，重建 DOM 会把它冲掉
+    if (renamePath) { pendingData = nodes; return }
+    data = nodes
+    render()
+  }
+  function flushPendingData() {
+    if (!pendingData) return false
+    data = pendingData
+    pendingData = null
+    return true
+  }
+  function select(path: string) { selectedPath = path; if (!renamePath) render() }
+  function ensureExpanded(path: string) { if (!expanded.has(path)) { expanded.add(path); if (!renamePath) render() } }
+  function clear() { data = []; pendingData = null; selectedPath = ''; renamePath = null; renameDraft = null; expanded.clear(); render() }
+
+  /** 让指定行进入重命名态（文件/文件夹均可），输入框聚焦并全选 */
+  function startRename(path: string) {
+    const node = find(data, path)
+    if (!node) return
+    renamePath = path
+    renameDraft = null
+    if (node.type === 'file') selectedPath = path
+    render()
+  }
 
   function render() {
     container.innerHTML = ''
@@ -53,21 +80,34 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       input.className = 'tree-rename'
       // Markdown 文件隐藏后缀，只改名字；提交时由 doRename 补回 .md
       const baseName = n.name.replace(/\.(md|markdown|mdown|mkd)$/i, '')
-      input.value = baseName
+      input.value = renameDraft ?? baseName
       input.spellcheck = false
       const done = (commit: boolean) => {
         if (!renamePath) return
         const oldPath = renamePath
+        const value = input.value
         renamePath = null
-        if (commit && input.value !== baseName) h.onRename(oldPath, input.value)
-        else render()
+        renameDraft = null
+        if (commit && value !== baseName) {
+          flushPendingData()
+          h.onRename(oldPath, value)
+        } else {
+          flushPendingData()
+          render()
+          h.onRenameSettled?.(oldPath, commit)
+        }
       }
+      input.addEventListener('input', () => { renameDraft = input.value })
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') done(true)
         else if (e.key === 'Escape') done(false)
         e.stopPropagation()
       })
-      input.addEventListener('blur', () => done(true))
+      input.addEventListener('blur', () => {
+        // 输入框被 render() 重建时也会触发 blur，此时元素已脱离文档，不能当作用户失焦提交
+        if (!input.isConnected) return
+        done(true)
+      })
       input.addEventListener('click', (e) => e.stopPropagation())
       el.append(input)
       queueMicrotask(() => { input.focus(); input.select() })
@@ -112,8 +152,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     const node = find(data, rowEl.dataset.path!)
     if (node?.type === 'file') {
       e.preventDefault()
-      renamePath = node.path
-      render()
+      startRename(node.path)
     }
   })
 
@@ -144,7 +183,11 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
   }
 
   render()
-  return { setData, select, ensureExpanded, clear, get selected() { return selectedPath } }
+  return {
+    setData, select, ensureExpanded, clear, startRename,
+    get selected() { return selectedPath },
+    get renaming() { return renamePath !== null },
+  }
 }
 
 export { basename }

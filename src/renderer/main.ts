@@ -176,7 +176,17 @@ const treeCtl = createTree(els.tree, {
   onOpenFile(p) { void openFile(p) },
   onContext(kind, path, x, y) { void showTreeMenu(kind, path, x, y) },
   onRename(oldPath, newName) { void doRename(oldPath, newName) },
+  onRenameSettled(oldPath, committed) {
+    // 新建文件后的重命名：Escape 取消则保持默认名不打开；名字没改直接提交则按默认名打开
+    if (pendingOpenPath !== oldPath) return
+    const p = pendingOpenPath
+    pendingOpenPath = null
+    if (committed) void openFile(p)
+  },
 })
+
+/** 新建文件后等待重命名完成再打开的路径（非新建流程为 null） */
+let pendingOpenPath: string | null = null
 
 async function refreshTree() {
   if (!state.root) return
@@ -680,18 +690,18 @@ async function showTreeMenu(kind: 'file' | 'dir' | 'root', path: string, x: numb
 }
 
 function startTreeRename(path: string) {
-  const row = els.tree.querySelector<HTMLElement>(`.tree-row[data-path="${CSS.escape(path)}"]`)
-  if (!row) return
-  const dbl = new MouseEvent('dblclick', { bubbles: true })
-  row.dispatchEvent(dbl)
+  treeCtl.startRename(path)
 }
 
 async function createEntry(parent: string, type: 'file' | 'dir') {
   try {
     const p = await window.api.create(parent, type === 'file' ? '未命名' : '新建文件夹', type)
+    treeCtl.ensureExpanded(parent)
     if (type === 'dir') treeCtl.ensureExpanded(p)
     await refreshTree()
-    if (type === 'file') void openFile(p)
+    // 新建后先进入重命名态（光标落在文件名上），文件在重命名提交后才打开
+    pendingOpenPath = type === 'file' ? p : null
+    treeCtl.startRename(p)
   } catch (e) {
     setStatus(e instanceof Error ? e.message : '新建失败', true)
   }
@@ -702,6 +712,7 @@ async function doRename(oldPath: string, newName: string) {
   if (/\.(md|markdown|mdown|mkd)$/i.test(oldPath) && !/\.[a-z0-9]+$/i.test(name)) name += '.md'
   const error = await window.api.validateName(name)
   if (error) {
+    if (pendingOpenPath === oldPath) pendingOpenPath = null
     await refreshTree()
     setStatus(error, true)
     return
@@ -709,8 +720,13 @@ async function doRename(oldPath: string, newName: string) {
   const newPath = await window.api.rename(oldPath, name)
   await refreshTree()
   if (!newPath) {
+    if (pendingOpenPath === oldPath) pendingOpenPath = null
     setStatus('已存在同名文件或文件夹', true)
     return
+  }
+  if (pendingOpenPath === oldPath) {
+    pendingOpenPath = null
+    void openFile(newPath)
   }
   if (state.openPath === oldPath) {
     state.openPath = newPath
