@@ -20,6 +20,8 @@ fileAssociations:
 win:
   target: nsis
   icon: build/icon.ico
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
 nsis:
   perMachine: false
   artifactName: tinymd-${version}-setup.${ext}

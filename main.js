@@ -19,6 +19,13 @@ const MIME = {
 }
 
 let win = null
+
+// 欢迎页与编辑器使用两套窗口尺寸：欢迎页只够显示内容即可，进入编辑器再放大
+const WELCOME_W = 480
+const WELCOME_H = 400
+const WORKSPACE_W = 1020
+const WORKSPACE_H = 680
+
 const imageViewerWindows = new Set()
 const imageViewerData = new Map()
 let currentRoot = null
@@ -106,10 +113,10 @@ function setWorkspaceRoot(root) {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1120,
-    height: 740,
-    minWidth: 780,
-    minHeight: 540,
+    width: pendingOpenFile ? WORKSPACE_W : WELCOME_W,
+    height: pendingOpenFile ? WORKSPACE_H : WELCOME_H,
+    minWidth: 460,
+    minHeight: 380,
     show: false,
     title: 'tinymd',
     icon: APP_ICON,
@@ -318,6 +325,16 @@ function registerIpc() {
     return r.canceled ? null : r.filePaths[0]
   })
 
+  ipcMain.handle('dialog:chooseFile', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: '选择要打开的 Markdown 文件',
+      buttonLabel: '打开',
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }],
+    })
+    return r.canceled ? null : r.filePaths[0]
+  })
+
   ipcMain.handle('workspace:setRoot', (_e, root) => { setWorkspaceRoot(root); return true })
   ipcMain.handle('fs:tree', (_e, root) => listTree(root, 0))
 
@@ -445,6 +462,15 @@ function registerIpc() {
   }))
 
   ipcMain.handle('app:initialFile', () => pendingOpenFile)
+
+  // 渲染层在进入/退出编辑器时调用，让窗口在两套尺寸间切换
+  ipcMain.handle('ui:resize', (_e, mode) => {
+    if (!win || win.isDestroyed()) return false
+    const w = mode === 'workspace' ? WORKSPACE_W : WELCOME_W
+    const h = mode === 'workspace' ? WORKSPACE_H : WELCOME_H
+    win.setSize(w, h, true)
+    return true
+  })
 
   ipcMain.handle('ui:theme', (_e, mode) => {
     currentThemeMode = mode

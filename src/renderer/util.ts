@@ -102,6 +102,7 @@ export interface ImageStorageSettings {
 export interface Api {
   platform: string
   chooseFolder(): Promise<string | null>
+  chooseFile(): Promise<string | null>
   setRoot(root: string): Promise<boolean>
   tree(root: string): Promise<TreeNode[]>
   read(p: string): Promise<string>
@@ -124,6 +125,7 @@ export interface Api {
   openImageViewer(src: string, title: string): Promise<boolean>
   imageViewerData(): Promise<{ src: string; title: string } | null>
   initialFile(): Promise<string | null>
+  resizeWindow(mode: 'welcome' | 'workspace'): Promise<boolean>
   onFsChanged(cb: () => void): () => void
   onMenu(cb: (action: string) => void): () => void
   onOpenFile(cb: (p: string) => void): () => void

@@ -12,6 +12,7 @@ const MD_RE = /\.(md|markdown|mdown|mkd)$/i
 const els = {
   welcome: $('#view-welcome'),
   btnOpenFolder: $('#btn-open-folder'),
+  btnOpenFile: $('#btn-open-file'),
   recents: $('#recents'),
   workspace: $('#view-workspace'),
   topbar: $('#topbar'),
@@ -196,13 +197,25 @@ async function refreshTree() {
 // ---------- status ----------
 
 let statusTimer: number | undefined
+let persistentStatus = ''   // 保存状态：左侧常驻显示，不自动消失
 function setStatus(text: string, isError = false) {
-  // 状态显示在右下角胶囊里（与字数并列）；未打开文档时也要能弹提示
+  // 保存状态（已保存 / 编辑中…）常驻在左侧；其余为临时提示，2.4s 后回落到保存状态
+  if (text === '已保存' || text === '编辑中…') {
+    persistentStatus = text
+    clearTimeout(statusTimer)
+    els.statusPill.classList.remove('hidden')
+    els.status.textContent = text
+    els.status.classList.remove('error')
+    return
+  }
   els.statusPill.classList.remove('hidden')
   els.status.textContent = text
   els.status.classList.toggle('error', isError)
   clearTimeout(statusTimer)
-  if (text === '已保存' || isError) statusTimer = window.setTimeout(() => { els.status.textContent = '' }, 2400)
+  statusTimer = window.setTimeout(() => {
+    els.status.textContent = persistentStatus
+    els.status.classList.toggle('error', false)
+  }, 2400)
 }
 
 // ---------- save ----------
@@ -277,6 +290,7 @@ async function openWorkspace(root: string, selectFile?: string) {
   els.wsPath.title = root
   els.welcome.classList.add('hidden')
   els.workspace.classList.remove('hidden')
+  void window.api.resizeWindow('workspace')
   addRecent(root)
   document.title = basename(root)
   if (selectFile) await openFile(selectFile)
@@ -292,6 +306,7 @@ async function closeWorkspace() {
   treeCtl.clear()
   els.workspace.classList.add('hidden')
   els.welcome.classList.remove('hidden')
+  void window.api.resizeWindow('welcome')
   document.title = 'tinymd'
   renderRecents()
 }
@@ -300,7 +315,6 @@ function showEditor() {
   els.editorEmpty.classList.add('hidden')
   els.editorWrap.classList.toggle('hidden', editorMode !== 'visual')
   els.sourceWrap.classList.toggle('hidden', editorMode !== 'source')
-  els.statusPill.classList.remove('hidden')
   updateEditorModeButton()
   renderOutline()
 }
@@ -309,7 +323,12 @@ function showEditorEmpty() {
   state.openPath = null
   els.editorWrap.classList.add('hidden')
   els.sourceWrap.classList.add('hidden')
-  els.statusPill.classList.add('hidden')
+  // 状态栏常驻：没有打开文档时只清空内容，不隐藏整条栏
+  clearTimeout(statusTimer)
+  persistentStatus = ''
+  els.status.textContent = ''
+  els.status.classList.remove('error')
+  els.count.textContent = ''
   updateEditorModeButton()
   els.editorEmpty.classList.remove('hidden')
   renderOutline()
@@ -896,6 +915,7 @@ els.btnWsMore.addEventListener('click', async (e) => {
   else if (id === 'open-other') chooseAndOpen()
 })
 els.btnOpenFolder.addEventListener('click', chooseAndOpen)
+els.btnOpenFile.addEventListener('click', chooseAndOpenFile)
 $('#btn-add-file').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'file') })
 $('#btn-add-folder').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'dir') })
 els.editorEmpty.querySelector('#btn-new-file')!.addEventListener('click', () => {
@@ -905,6 +925,11 @@ els.editorEmpty.querySelector('#btn-new-file')!.addEventListener('click', () => 
 async function chooseAndOpen() {
   const p = await window.api.chooseFolder()
   if (p) void openWorkspace(p)
+}
+
+async function chooseAndOpenFile() {
+  const p = await window.api.chooseFile()
+  if (p) void openWorkspace(dirname(p), p)
 }
 
 // ---------- menu events ----------

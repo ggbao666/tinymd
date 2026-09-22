@@ -1,0 +1,68 @@
+tinymd 命令说明（package.json scripts）
+=====================================
+
+运行方式：在终端执行  npm run <命令名>
+（下面是 `npm run` 后面的名字）
+
+build:icon
+  作用：根据 build/ 下的源图标生成各尺寸图标（apply_icon.mjs，参数 25）。
+  时机：打包安装包前调用，确保 exe / 窗口图标是最新的。
+  等价：node build/apply_icon.mjs 25
+
+clean
+  作用：清理构建产物（默认交互式确认）。
+  等价：node build/clean.mjs
+
+clean:build
+  作用：清理构建产物（build 目录），跳过确认（--yes）。
+  等价：node build/clean.mjs --yes
+
+clean:cache
+  作用：仅清理缓存（--cache），跳过确认。
+  等价：node build/clean.mjs --cache --yes
+
+clean:all
+  作用：清理全部（构建产物 + 缓存），跳过确认（--all --yes）。
+  等价：node build/clean.mjs --all --yes
+
+dev
+  作用：开发模式。同时启动 Vite 开发服务器和 Electron，
+        并等待 127.0.0.1:5173 就绪后载入页面，支持热更新。
+  等价：concurrently -k -s first "vite" "wait-on ... && cross-env VITE_DEV_SERVER_URL=... electron ."
+
+build
+  作用：用 Vite 把渲染进程打包到 dist/renderer（仅构建，不启动）。
+  等价：vite build
+
+start
+  作用：构建一次，然后用 Electron 打开应用（运行打包后的产物）。
+  等价：npm run build && electron .
+  说明：首次运行若 node_modules/electron/dist 缺二进制，会临时下载一次，
+        之后不再下载。
+
+typecheck
+  作用：TypeScript 类型检查（tsc --noEmit），不输出文件，只查错。
+  等价：tsc --noEmit
+
+dist
+  作用：生成发布包（当前平台默认目标）。
+        流程：build:icon → build → electron-builder。
+  等价：npm run build:icon && npm run build && electron-builder
+  说明：Electron 下载走 electron-builder.yml 里的 electronDownload.mirror（npmmirror）。
+
+dist:win
+  作用：生成 Windows 安装包（nsis）。
+        流程：build:icon → build → electron-builder --win。
+        额外通过 ELECTRON_BUILDER_BINARIES_MIRROR 走 npmmirror 拉 nsis 等二进制。
+  等价：npm run build:icon && npm run build && cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win
+
+unpack
+  作用：生成未打包的目录形式（--dir），便于本地预览而不打安装包。
+        流程：build:icon → build → electron-builder --dir。
+  等价：npm run build:icon && npm run build && electron-builder --dir
+  说明：--dir 不打安装包，因此不需要 ELECTRON_BUILDER_BINARIES_MIRROR。
+
+-------------------------------------
+相关配置：electron-builder.yml
+  electronDownload.mirror = https://npmmirror.com/mirrors/electron/
+  → 已把 Electron 镜像收进打包配置，无需在命令行里重复写 ELECTRON_MIRROR。

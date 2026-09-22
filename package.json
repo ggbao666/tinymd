@@ -18,8 +18,8 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "dist": "npm run build:icon && npm run build && electron-builder",
-    "dist:win": "npm run build:icon && vite build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win",
-    "unpack": "npm run build:icon && vite build && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
+    "dist:win": "npm run build:icon && npm run build && cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win",
+    "unpack": "npm run build:icon && npm run build && electron-builder --dir"
   },
   "dependencies": {
     "@tiptap/core": "^3.31.3",

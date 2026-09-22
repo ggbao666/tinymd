@@ -15,9 +15,9 @@
       .hidden { display: none !important; }
       #view-welcome { height: 100vh; display: flex; align-items: center; justify-content: center; -webkit-app-region: drag; }
       #view-welcome button, #view-welcome input, #view-welcome .recents { -webkit-app-region: no-drag; }
-      .welcome-inner { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 24px; max-width: 420px; width: 100%; }
-      .app-mark { width: 84px; height: 84px; display: flex; align-items: center; justify-content: center; margin-bottom: 22px; }
-      .app-mark svg { width: 84px; height: 84px; display: block; }
+      .welcome-inner { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 20px 20px; max-width: 380px; width: 100%; }
+      .app-mark { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+      .app-mark svg { width: 60px; height: 60px; display: block; }
     </style>
   </head>
   <body>
@@ -32,10 +32,17 @@
           </svg>
         </div>
         <h1>tinymd</h1>
-        <p class="tagline">安静的 Markdown 工作空间</p>
-        <button id="btn-open-folder" class="btn-primary">打开文件夹…</button>
+        <div class="entry-links">
+          <button id="btn-open-folder" class="btn-open">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>
+            打开文件夹…
+          </button>
+          <button id="btn-open-file" class="btn-link">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2.5 1.8h6L12 5.3v8.2c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V2.5c0-.4.3-.7.7-.7Z"/><path d="M8.5 1.8v3.5H12" stroke-linecap="round"/></svg>
+            打开文件…
+          </button>
+        </div>
         <div id="recents" class="recents"></div>
-        <p class="hint">在访达 / 资源管理器中右键 Markdown 文件，也可以直接用「tinymd」打开。</p>
       </div>
     </div>
 
@@ -103,7 +110,7 @@
           <div id="source-wrap" class="hidden">
             <textarea id="source-editor" aria-label="Markdown 纯文本编辑器" placeholder="在这里编辑 Markdown 源文本…" spellcheck="false" wrap="off"></textarea>
           </div>
-          <div id="status-pill" class="hidden">
+          <div id="status-pill">
             <span id="status"></span>
             <span id="count"></span>
           </div>

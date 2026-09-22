@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   platform: process.platform,
 
   chooseFolder: () => ipcRenderer.invoke('dialog:chooseFolder'),
+  chooseFile: () => ipcRenderer.invoke('dialog:chooseFile'),
   setRoot: (root) => ipcRenderer.invoke('workspace:setRoot', root),
   tree: (root) => ipcRenderer.invoke('fs:tree', root),
   read: (p) => ipcRenderer.invoke('fs:read', p),
@@ -34,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   imageViewerData: () => ipcRenderer.invoke('ui:imageViewerData'),
 
   initialFile: () => ipcRenderer.invoke('app:initialFile'),
+  resizeWindow: (mode) => ipcRenderer.invoke('ui:resize', mode),
 
   onFsChanged: (cb) => on('fs:changed', cb),
   onMenu: (cb) => on('menu', cb),
