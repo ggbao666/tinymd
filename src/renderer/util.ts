@@ -113,6 +113,7 @@ export interface Api {
   rename(p: string, newName: string): Promise<string | null>
   trash(p: string): Promise<boolean>
   reveal(p: string): Promise<boolean>
+  openDir(p: string): Promise<boolean>
   chooseImageDirectory(defaultPath?: string): Promise<string | null>
   allowImageDirectory(directory: string): Promise<boolean>
   saveImage(fileName: string, data: Uint8Array, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>

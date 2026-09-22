@@ -1,9 +1,5 @@
 @import './themes/neutral.css';
 @import './themes/light.css';
-@import './themes/dark.css';
-@import './themes/qq.css';
-@import './themes/wb-light.css';
-@import './themes/wb-dark.css';
 
 /* ============ 简墨 · Apple 风格基础 ============ */
 
@@ -931,9 +927,8 @@ body.width-wide { --content-width: 1000px; }
   overflow-x: auto;
   line-height: 1.6;
 }
-/* 代码块右上角语言角标（Tiptap 会写 data-language 属性） */
-.ProseMirror pre[data-language]::after {
-  content: attr(data-language);
+/* 代码块右上角语言角标（点了可以换语言，命中区在右上角 130×26） */
+.ProseMirror pre::after {
   position: absolute;
   top: 7px;
   right: 12px;
@@ -945,6 +940,10 @@ body.width-wide { --content-width: 1000px; }
   pointer-events: none;
   user-select: none;
 }
+.ProseMirror pre[data-language]::after { content: attr(data-language); }
+/* 悬停提示：未指定语言按纯文本处理；用灰色而非强调色，安静不抢眼 */
+.ProseMirror pre:hover::after { content: '纯文本'; color: var(--text-2); }
+.ProseMirror pre[data-language]:hover::after { content: attr(data-language); color: var(--text-2); }
 .ProseMirror pre code {
   color: inherit;
   background: none;
@@ -1134,6 +1133,34 @@ body.width-wide { --content-width: 1000px; }
   margin: 0 3px;
   background: var(--hairline);
 }
+
+/* ============ 代码块语言菜单 ============ */
+
+.lang-menu {
+  position: fixed;
+  z-index: 260;
+  width: 150px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+  animation: slash-in 0.1s ease;
+}
+.lang-menu.hidden { display: none; }
+.lang-item {
+  font-size: 12.5px;
+  line-height: 1;
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+.lang-item:hover { background: var(--hover); }
+.lang-item.on { background: var(--accent-soft); color: var(--accent); }
 
 /* ============ 链接浮层 ============ */
 

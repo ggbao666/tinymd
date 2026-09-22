@@ -1,39 +1,40 @@
 html.theme-light {
-  /* 底色：干净的纸白正文区 + 微微暖灰的侧栏，拉开层次但不抢戏 */
-  --bg: #ffffff;
-  --bg-sidebar: #f6f6f4;
+  /* 中性亮色：与暗色（neutral）同一套灰调，只是翻转明度。
+     底色不用纯白，避免大面积刺眼；侧栏比正文深半档，保持层次。 */
+  --bg: #f4f4f2;
+  --bg-sidebar: #ececea;
 
-  /* 文字：暖调墨黑 → 中灰 → 浅灰，三段式 */
-  --text: #1b1b1f;
-  --text-2: #61616a;
-  --text-3: #a2a2ab;
+  /* 文字：暖调墨黑三段式 */
+  --text: #26262a;
+  --text-2: #6d6d74;
+  --text-3: #a5a5ac;
 
-  /* 分隔与悬停：用极淡的墨色，比纯黑叠加更柔和 */
-  --hairline: rgba(27, 27, 38, 0.07);
-  --hairline-strong: rgba(27, 27, 38, 0.13);
-  --hover: rgba(27, 27, 38, 0.045);
-  --active: rgba(27, 27, 38, 0.085);
+  /* 分隔与悬停：极淡的墨色叠加 */
+  --hairline: rgba(38, 38, 42, 0.08);
+  --hairline-strong: rgba(38, 38, 42, 0.14);
+  --hover: rgba(38, 38, 42, 0.05);
+  --active: rgba(38, 38, 42, 0.09);
 
-  /* 强调色：低饱和靛蓝，安静但有辨识度 */
-  --accent: #4f5ef7;
-  --accent-hover: #4050e6;
-  --accent-soft: rgba(79, 94, 247, 0.11);
-  --accent-softer: rgba(79, 94, 247, 0.07);
+  /* 强调色：与暗色同款蓝 */
+  --accent: #0a84ff;
+  --accent-hover: #0071e3;
+  --accent-soft: rgba(10, 132, 255, 0.1);
+  --accent-softer: rgba(10, 132, 255, 0.06);
 
-  /* 代码：浅墨灰底，文字随正文 */
-  --code-bg: rgba(27, 27, 38, 0.05);
-  --inline-code-bg: rgba(27, 27, 38, 0.06);
-  --inline-code-text: #1b1b1f;
+  /* 代码：浅墨灰底 */
+  --code-bg: rgba(38, 38, 42, 0.055);
+  --inline-code-bg: rgba(38, 38, 42, 0.065);
+  --inline-code-text: #26262a;
 
-  /* 语法高亮：GitHub 浅色系 */
+  /* 语法高亮：GitHub Light 官方色板 */
   --syn-keyword: #cf222e;
   --syn-string: #0a3069;
   --syn-number: #0550ae;
   --syn-function: #8250df;
   --syn-attr: #953800;
 
-  --sel: rgba(79, 94, 247, 0.2);
-  --danger: #e5484d;
-  --mark-gradient: #141416;
+  --sel: rgba(10, 132, 255, 0.25);
+  --danger: #d64545;
+  --mark-gradient: #e8e8e6;
   color-scheme: light;
 }

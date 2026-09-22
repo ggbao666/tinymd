@@ -463,33 +463,31 @@ $('#tab-files').addEventListener('click', () => setSideTab('files'))
 $('#tab-outline').addEventListener('click', () => setSideTab('outline'))
 setSideTab(localStorage.getItem(TAB_KEY) === 'outline' ? 'outline' : 'files')
 
-// ---------- theme（主题：跟随系统 / 亮 / 中性 / 暗 / 经典QQ / WB浅 / WB深） ----------
+// ---------- theme（主题：暗色（中性）/ 亮色，共两套灰调） ----------
 
 const THEME_KEY = 'jianmo.theme'
-type ThemeMode = 'system' | 'light' | 'neutral' | 'dark' | 'qq' | 'wb-light' | 'wb-dark'
+type ThemeMode = 'neutral' | 'light'
 
-let themeMode: ThemeMode = (['system', 'light', 'neutral', 'dark', 'qq', 'wb-light', 'wb-dark'] as const).includes(localStorage.getItem(THEME_KEY) as ThemeMode)
-  ? (localStorage.getItem(THEME_KEY) as ThemeMode)
-  : 'neutral'
-const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
+// 历史版本存过 system / dark / qq / wb-* 等模式，统一迁移：暗色系 → neutral，亮色系 → light
+const LEGACY_THEME_MAP: Record<string, ThemeMode> = {
+  system: 'neutral', dark: 'neutral', 'wb-dark': 'neutral',
+  light: 'light', qq: 'light', 'wb-light': 'light',
+}
+const storedTheme = localStorage.getItem(THEME_KEY)
+const VALID_THEMES: ThemeMode[] = ['neutral', 'light']
+let themeMode: ThemeMode = VALID_THEMES.includes(storedTheme as ThemeMode)
+  ? (storedTheme as ThemeMode)
+  : LEGACY_THEME_MAP[storedTheme || ''] ?? 'neutral'
 
 function applyTheme() {
-  const resolved = themeMode === 'system' ? (colorScheme.matches ? 'dark' : 'light') : themeMode
   const root = document.documentElement
-  root.classList.toggle('theme-dark', resolved === 'dark')
-  root.classList.toggle('theme-light', resolved === 'light')
-  root.classList.toggle('theme-neutral', resolved === 'neutral')
-  root.classList.toggle('theme-qq', resolved === 'qq')
-  root.classList.toggle('theme-wb-light', resolved === 'wb-light')
-  root.classList.toggle('theme-wb-dark', resolved === 'wb-dark')
+  root.classList.toggle('theme-neutral', themeMode === 'neutral')
+  root.classList.toggle('theme-light', themeMode === 'light')
   void window.api.setTheme(themeMode) // 原生右键菜单 + Windows 标题栏按钮跟随
   const settingsRadio = document.querySelector<HTMLInputElement>(`input[name="settings-theme"][value="${themeMode}"]`)
   if (settingsRadio) settingsRadio.checked = true
 }
 
-colorScheme.addEventListener('change', () => {
-  if (themeMode === 'system') applyTheme()
-})
 applyTheme()
 
 // ---------- images ----------
@@ -694,13 +692,15 @@ async function showTreeMenu(kind: 'file' | 'dir' | 'root', path: string, x: numb
     items.push({ id: 'rename', label: '重命名' }, { id: 'reveal', label: '在文件管理器中显示' }, '-')
     items.push({ id: 'delete', label: '移到废纸篓' })
   } else {
-    items.push({ id: 'new-file', label: '新建文件' }, { id: 'new-folder', label: '新建文件夹' })
+    items.push({ id: 'new-file', label: '新建文件' }, { id: 'new-folder', label: '新建文件夹' }, '-')
+    items.push({ id: 'open-dir', label: '在文件夹中打开' })
   }
   const id = await showContextMenu(items as never, x, y)
   if (!id) return
   switch (id) {
     case 'open': void openFile(path); break
     case 'reveal': void window.api.reveal(target); break
+    case 'open-dir': void window.api.openDir(target); break
     case 'new-file': await createEntry(target, 'file'); break
     case 'new-folder': await createEntry(target, 'dir'); break
     case 'rename': startTreeRename(path); break
@@ -904,6 +904,7 @@ els.btnWsMore.addEventListener('click', async (e) => {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
   const id = await showContextMenu(
     [
+      { id: 'open-dir', label: '在文件夹中打开' },
       { id: 'open-other', label: '打开其他文件夹…' },
       '-',
       { id: 'close-ws', label: '关闭工作空间' },
@@ -911,7 +912,8 @@ els.btnWsMore.addEventListener('click', async (e) => {
     Math.round(r.left),
     Math.round(r.bottom + 6),
   )
-  if (id === 'close-ws') void closeWorkspace()
+  if (id === 'open-dir') { if (state.root) void window.api.openDir(state.root) }
+  else if (id === 'close-ws') void closeWorkspace()
   else if (id === 'open-other') chooseAndOpen()
 })
 els.btnOpenFolder.addEventListener('click', chooseAndOpen)

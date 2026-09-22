@@ -1,4 +1,4 @@
-import { Editor, Extension } from '@tiptap/core'
+import { Editor, Extension, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
@@ -12,6 +12,7 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, Selection } from '@tiptap/pm/state'
 import { normalizeMarkdownImagePaths, resolveRel, toMediaUrl } from './util'
 import { createSlashMenu, slashGlyph, slashIcons } from './slash'
+import { createCodeLangMenu } from './code-lang'
 
 export interface EditorCallbacks {
   onChange(): void
@@ -79,6 +80,27 @@ let slash: ReturnType<typeof createSlashMenu> | null = null
 /** lowlight 实例（common 语言子集，约 40 种常用语言） */
 const lowlight = createLowlight(common)
 
+// 默认纯文本：没指定语言时 lowlight 会走 highlightAuto 自动猜语言并着色（经常猜错），
+// 这里屏蔽掉，未指定 / 未注册语言的代码块一律按纯文本渲染。
+Object.defineProperty(lowlight, 'highlightAuto', {
+  value: () => ({ type: 'root', children: [] }),
+})
+
+/**
+ * 语言角标：Tiptap 的 language 属性是 rendered:false，不会输出 data-language，
+ * 这里覆盖 renderHTML 补上，右上角角标才能显示（无语言时不输出，由 CSS 出「选择语言」提示）。
+ */
+const CodeBlockLangBadge = CodeBlockLowlight.extend({
+  renderHTML({ node, HTMLAttributes }) {
+    const lang = node.attrs.language ? String(node.attrs.language) : ''
+    return [
+      'pre',
+      mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, lang ? { 'data-language': lang } : {}),
+      ['code', { class: lang ? this.options.languageClassPrefix + lang : null }, 0],
+    ]
+  },
+})
+
 /**
  * 代码块起始位置的退格规则：
  * - 非空时吞掉 Backspace，避免代码块与前一段合并或在文档开头被转成段落。
@@ -114,7 +136,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         // 换成 lowlight 版代码块（语法高亮），语言角标 data-language 行为不变
         codeBlock: false,
       }),
-      CodeBlockLowlight.configure({ lowlight }),
+      CodeBlockLangBadge.configure({ lowlight }),
       CodeBlockBackspace,
       TaskList,
       TaskItem.configure({ nested: true }),
@@ -201,6 +223,8 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     { icon: slashIcons.image, title: '图片', hint: '插入本地图片（原样存入 assets）', keywords: ['image', 'img', 'photo', 'tupian', 'tp'], run: () => cb.onPickImage() },
   ])
 
+  const langMenu = createCodeLangMenu(editor)
+
   editor.on('transaction', () => {
     slash?.sync()
     // 气泡菜单按钮勾选态跟随当前选区的格式
@@ -223,6 +247,20 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     else if (action === 'italic') c.toggleItalic().run()
     else if (action === 'code') c.toggleCode().run()
     else if (action === 'strike') c.toggleStrike().run()
+  })
+
+  // 点代码块右上角语言角标 → 弹出语言菜单（角标是 ::after 伪元素，按命中区域判断）
+  host.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return
+    const pre = (e.target as HTMLElement).closest('pre')
+    if (!pre) return
+    const r = pre.getBoundingClientRect()
+    if (e.clientX < r.right - 130 || e.clientX > r.right - 4) return
+    if (e.clientY < r.top || e.clientY > r.top + 26) return
+    e.preventDefault()
+    // 阻止冒泡，否则 document 上的关闭监听会立刻把菜单关掉
+    e.stopPropagation()
+    langMenu.openAt(e.clientX, e.clientY)
   })
 
   // ⌘/Ctrl + 单击打开链接
@@ -311,6 +349,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     open(markdown: string, fileDir: string) {
       currentDir = fileDir
       slash?.close()
+      langMenu.close()
       editor.commands.setContent(normalizeMarkdownImagePaths(markdown), { contentType: 'markdown', emitUpdate: false })
       editor.view.dom.scrollTop = 0
     },
@@ -438,7 +477,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     doc(): PMNode {
       return editor.state.doc
     },
-    destroy() { editor.destroy() },
+    destroy() { langMenu.close(); slash?.close(); editor.destroy() },
   }
 }
 

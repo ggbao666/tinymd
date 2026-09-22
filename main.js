@@ -120,7 +120,7 @@ function createWindow() {
     show: false,
     title: 'tinymd',
     icon: APP_ICON,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e20' : '#ffffff',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#383a3d' : '#f4f4f2',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     // Windows WCO 不支持透明底色（#00000000 会回退成系统白），
     // 初始给中性主题底色，渲染层启动后会经 ui:theme 校正
@@ -381,6 +381,13 @@ function registerIpc() {
 
   ipcMain.handle('fs:trash', async (_e, p) => { assertInside(p); await shell.trashItem(p); return true })
   ipcMain.handle('fs:reveal', (_e, p) => { shell.showItemInFolder(p); return true })
+  // 用系统文件管理器打开目录（区别于 reveal 的“定位并选中”）；限定在已授权根目录内
+  ipcMain.handle('fs:openDir', (_e, p) => {
+    const dir = path.resolve(String(p))
+    if (![...allowedRoots].some((r) => insideRoot(r, dir))) return false
+    void shell.openPath(dir)
+    return true
+  })
 
   ipcMain.handle('img:chooseDirectory', async (_e, defaultPath) => {
     const options = {
@@ -474,7 +481,7 @@ function registerIpc() {
 
   ipcMain.handle('ui:theme', (_e, mode) => {
     currentThemeMode = mode
-    nativeTheme.themeSource = mode === 'dark' || mode === 'neutral' || mode === 'wb-dark' ? 'dark' : mode === 'system' ? 'system' : 'light'
+    nativeTheme.themeSource = mode === 'neutral' ? 'dark' : 'light'
     if (process.platform === 'win32' && win && !win.isDestroyed()) {
       win.setTitleBarOverlay(overlayFor(mode))
     }
@@ -488,9 +495,9 @@ function registerIpc() {
 // 必须给与渲染层 --bg 一致的真实底色；currentThemeMode 由 ui:theme 维护
 let currentThemeMode = 'neutral'
 function overlayFor(mode) {
-  const resolved = mode === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : mode
-  const bg = { light: '#ffffff', neutral: '#383a3d', dark: '#1e1e20', qq: '#ffffff', 'wb-light': '#ffffff', 'wb-dark': '#141414' }[resolved] || '#383a3d'
-  const dark = resolved === 'dark' || resolved === 'neutral' || resolved === 'wb-dark'
+  const resolved = mode === 'neutral' ? 'dark' : 'light'
+  const bg = { light: '#f4f4f2', neutral: '#383a3d' }[resolved] || '#383a3d'
+  const dark = resolved === 'dark'
   return { color: bg, symbolColor: dark ? '#eaeaeb' : '#1d1d1f', height: 38 }
 }
 
@@ -548,7 +555,7 @@ if (!gotLock) {
     nativeTheme.on('updated', () => {
       if (!win || win.isDestroyed()) return
       try {
-        win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#1e1e20' : '#ffffff')
+        win.setBackgroundColor(currentThemeMode === 'neutral' ? '#383a3d' : '#f4f4f2')
         if (process.platform === 'win32') win.setTitleBarOverlay(overlayFor(currentThemeMode))
       } catch { /* ignore */ }
     })
