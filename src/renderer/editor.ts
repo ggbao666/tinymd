@@ -424,7 +424,6 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         case 'col-after': return c.addColumnAfter().run()
         case 'row-delete': return c.deleteRow().run()
         case 'col-delete': return c.deleteColumn().run()
-        case 'header': return c.toggleHeaderRow().run()
         case 'table-delete': return c.deleteTable().run()
       }
       return false

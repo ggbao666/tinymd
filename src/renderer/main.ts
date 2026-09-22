@@ -148,8 +148,6 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
         { id: 'col-before', label: '在左侧插入列' },
         { id: 'col-after', label: '在右侧插入列' },
         '-',
-        { id: 'header', label: '切换标题行' },
-        '-',
         { id: 'row-delete', label: '删除行' },
         { id: 'col-delete', label: '删除列' },
         '-',
