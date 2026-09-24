@@ -803,9 +803,9 @@ body.side-outline #tree { display: none; }
 
 /* ============ 内容区 ============ */
 
-:root { --content-width: 736px; }
-body.width-narrow { --content-width: 720px; }
-body.width-wide { --content-width: 1000px; }
+:root { --content-pad: 48px; }
+body.width-narrow { --content-pad: 96px; }
+body.width-wide { --content-pad: 24px; }
 
 #content {
   flex: 1;
@@ -835,14 +835,16 @@ body.width-wide { --content-width: 1000px; }
 #editor-wrap {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   animation: fade-in 0.16s ease;
 }
 
+/* 正文占满内容区、左对齐；左右内边距相等 → 无论窗口大小，左右留白始终对称。
+   不再使用 max-width + margin:auto 的“居中窄列”，避免左侧出现大块空白。 */
 #editor {
-  max-width: var(--content-width);
-  margin: 0 auto;
-  padding: 34px 48px 32px;
+  width: 100%;
+  padding: 34px var(--content-pad) 32px;
 }
 
 @keyframes fade-in { from { opacity: 0; } }
@@ -902,7 +904,7 @@ body.width-wide { --content-width: 1000px; }
   width: 100%;
   height: 100%;
   margin: 0;
-  padding: 48px max(48px, calc((100% - 640px) / 2)) 34vh;
+  padding: 48px var(--content-pad) 32px;
   resize: none;
   outline: none;
   color: var(--text);
