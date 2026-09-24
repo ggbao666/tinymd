@@ -593,6 +593,14 @@ body.win #topbar { padding-right: 146px; }
   overflow: hidden;
 }
 body.no-sidebar #sidebar { width: 0 !important; }
+
+/* 单文件模式（打开文件/拖拽/双击打开）：不显示文件树，只看大纲。
+   底部路径条保留，显示当前文件完整路径；新建按钮依赖工作空间目录，一并隐藏。 */
+body.file-mode #sidebar-header { display: none; }
+body.file-mode #tree { display: none !important; }
+body.file-mode #outline { display: block; }
+body.file-mode #btn-add-file,
+body.file-mode #btn-add-folder { display: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing #sidebar { transition: none; }
 body.resizing #content { pointer-events: none; }
@@ -1192,3 +1200,26 @@ body.width-wide { --content-pad: 24px; }
   outline: none;
 }
 #link-input:focus { border-color: var(--accent); }
+
+/* ============ 悬停链接浮出的地址提示 ============ */
+
+/* 用 fixed 定位挂在 body 上，避免被 #editor-wrap 的滚动裁切；
+   pointer-events:none 保证它不挡鼠标、不影响选区。
+   实底浮层（与 #link-popover 同款），文字用 --text-2 保证在底色上清晰可读。 */
+.link-tip {
+  position: fixed;
+  z-index: 400;
+  max-width: min(460px, calc(100vw - 24px));
+  padding: 5px 9px;
+  background: var(--bg);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.1);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+  pointer-events: none;
+  user-select: none;
+}

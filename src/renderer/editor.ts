@@ -150,8 +150,10 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       BubbleMenu.configure({
         element: bubbleEl,
         shouldShow: ({ state, view }) => {
-          // 空选区不弹；代码块内行内格式无意义也不弹
+          // 空选区不弹；代码块内行内格式无意义也不弹；
+          // 点选图片等产生的是节点选区（NodeSelection），格式按钮无意义，同样不弹
           if (state.selection.empty || !view.hasFocus()) return false
+          if (state.selection instanceof NodeSelection) return false
           return state.selection.$from.parent.type.name !== 'codeBlock'
         },
         options: { placement: 'top', offset: 8 },
@@ -272,6 +274,44 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       cb.onOpenLink(a.getAttribute('href') || '')
     }
   })
+
+  // 悬停链接时浮出完整地址。地址只用于展示，不写入文档属性，
+  // 因此不会影响导出 Markdown 时的链接语法。
+  const linkTip = document.createElement('div')
+  linkTip.className = 'link-tip hidden'
+  document.body.appendChild(linkTip)
+
+  const hideLinkTip = () => linkTip.classList.add('hidden')
+
+  const showLinkTip = (a: HTMLAnchorElement) => {
+    const href = a.getAttribute('href') || ''
+    if (!href) return
+    linkTip.textContent = href
+    // 先去掉 hidden 再量尺寸，否则量到的是 0
+    linkTip.classList.remove('hidden')
+    const r = a.getBoundingClientRect()
+    const t = linkTip.getBoundingClientRect()
+    const gap = 6
+    // 默认浮在链接上方：鼠标光标就在链接附近，放下方会被光标/指针挡住
+    // 上方空间不足（贴近窗口顶部）时才退回下方
+    let top = r.top - t.height - gap
+    if (top < 8) top = r.bottom + gap
+    // 水平夹取在窗口内，避免超长地址被截到屏幕外
+    let left = r.left
+    if (left + t.width > window.innerWidth - 8) left = window.innerWidth - t.width - 8
+    if (left < 8) left = 8
+    linkTip.style.top = `${Math.max(8, top)}px`
+    linkTip.style.left = `${left}px`
+  }
+
+  host.addEventListener('mouseover', (e) => {
+    const a = (e.target as HTMLElement).closest('a')
+    if (a) showLinkTip(a as HTMLAnchorElement)
+    else hideLinkTip()
+  })
+  host.addEventListener('mouseleave', hideLinkTip)
+  // 捕获阶段监听：任何滚动容器滚动都收起提示，避免浮层与链接脱节
+  window.addEventListener('scroll', hideLinkTip, true)
 
   // 双击图片是右键菜单“查看图片”的快捷方式
   host.addEventListener('dblclick', (e) => {

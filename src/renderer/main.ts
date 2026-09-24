@@ -32,7 +32,6 @@ const els = {
   sourceModeButton: $('#btn-source-mode') as HTMLButtonElement,
   count: $('#count'),
   statusPill: $('#status-pill'),
-  btnWsMore: $('#btn-ws-more'),
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
   fileInput: $('#file-input') as HTMLInputElement,
@@ -50,6 +49,8 @@ const state = {
   openPath: null as string | null,
   dirty: false,
 }
+// 单文件模式：通过「打开文件」/拖拽/双击打开单个 md，只看大纲，不显示文件树
+let fileMode = false
 type EditorMode = 'visual' | 'source'
 let editorMode: EditorMode = 'visual'
 let lastSaved = ''
@@ -78,7 +79,8 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
       void window.api.openExternal(url)
       return
     }
-    if (/\.md$/i.test(url) && state.root && state.openPath) {
+    // 相对 .md 链接：目录模式以工作空间为界，单文件模式以文件所在目录为界
+    if (/\.md$/i.test(url) && state.openPath) {
       const abs = resolveInside(state.openPath, url)
       if (abs) void openFile(abs)
     }
@@ -165,8 +167,9 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
 
 function resolveInside(fromFile: string, rel: string): string | null {
   const abs = resolveRel(dirname(fromFile), rel)
-  const root = state.root!.replace(/\\/g, '/')
-  return abs.startsWith(root + '/') ? abs : null
+  // 单文件模式下没有工作空间，以当前文件所在目录为边界
+  const boundary = (state.root ?? dirname(fromFile)).replace(/\\/g, '/')
+  return abs.startsWith(boundary + '/') ? abs : null
 }
 
 // ---------- tree ----------
@@ -270,7 +273,8 @@ async function openFile(path: string) {
     showEditor()
     updateBreadcrumb()
     updateCount()
-    document.title = `${basename(path)} — ${basename(state.root || '')}`
+    const dr = displayRoot()
+    document.title = dr ? `${basename(path)} — ${basename(dr)}` : basename(path)
     els.editorWrap.scrollTop = 0
     els.sourceEditor.scrollTop = 0
     void localizeRemoteImages(editorCtl.remoteImageSources())
@@ -283,6 +287,10 @@ async function openWorkspace(root: string, selectFile?: string) {
   await flushSave()
   await window.api.setRoot(root)
   state.root = root
+  // 从单文件模式切回目录模式：恢复文件树与标签头
+  fileMode = false
+  document.body.classList.remove('file-mode')
+  setSideTab('files')
   treeCtl.setData(await window.api.tree(root))
   els.wsPath.textContent = root
   els.wsPath.title = root
@@ -295,9 +303,32 @@ async function openWorkspace(root: string, selectFile?: string) {
   else showEditorEmpty()
 }
 
+// 单文件打开（打开文件 / 拖拽 / 双击 md / 右键打开）：
+// 不把所在文件夹当工作空间，侧栏只保留大纲，底部路径条显示当前文件。
+async function openSingleFile(path: string) {
+  await flushSave()
+  state.root = null
+  fileMode = true
+  document.body.classList.add('file-mode')
+  treeCtl.clear()
+  setSideTab('outline')
+  els.welcome.classList.add('hidden')
+  els.workspace.classList.remove('hidden')
+  void window.api.resizeWindow('workspace')
+  // 与目录模式一致：底部路径条显示的是目录路径，不是文件路径
+  const dir = dirname(path)
+  els.wsPath.textContent = dir
+  els.wsPath.title = dir
+  addRecent(path, 'file')
+  state.openPath = null
+  await openFile(path)
+}
+
 async function closeWorkspace() {
   await flushSave()
   state.root = null
+  fileMode = false
+  document.body.classList.remove('file-mode')
   state.openPath = null
   state.dirty = false
   lastSaved = ''
@@ -331,26 +362,37 @@ function showEditorEmpty() {
   els.editorEmpty.classList.remove('hidden')
   renderOutline()
   updateBreadcrumb()
-  document.title = basename(state.root || '')
+  document.title = basename(displayRoot())
+}
+
+// 单文件模式下没有挂工作空间（state.root 为 null），但文件所在目录是已知的。
+// 目录名一类的展示要与目录模式保持一致，区别只是不能对工作目录做新建/删除/重命名。
+function displayRoot(): string {
+  return state.root || (state.openPath ? dirname(state.openPath) : '')
 }
 
 function updateBreadcrumb() {
-  const root = state.root ? basename(state.root) : ''
+  const root = displayRoot() ? basename(displayRoot()) : ''
   const file = state.openPath ? basename(state.openPath) : ''
   els.breadcrumb.innerHTML = ''
-  const f = document.createElement('span')
-  f.className = 'crumb-folder'
-  f.textContent = root
-  els.breadcrumb.append(f)
+  if (root) {
+    const f = document.createElement('span')
+    f.className = 'crumb-folder'
+    f.textContent = root
+    els.breadcrumb.append(f)
+  }
   if (file) {
-    const sep = document.createElement('span')
-    sep.className = 'crumb-sep'
-    sep.textContent = '›'
+    if (root) {
+      const sep = document.createElement('span')
+      sep.className = 'crumb-sep'
+      sep.textContent = '›'
+      els.breadcrumb.append(sep)
+    }
     const d = document.createElement('span')
     d.className = 'crumb-doc'
     d.textContent = file
     if (state.dirty) d.classList.add('dirty')
-    els.breadcrumb.append(sep, d)
+    els.breadcrumb.append(d)
   }
 }
 
@@ -749,7 +791,7 @@ async function doRename(oldPath: string, newName: string) {
     state.openPath = newPath
     treeCtl.select(newPath)
     updateBreadcrumb()
-    document.title = `${basename(newPath)} — ${basename(state.root || '')}`
+    document.title = `${basename(newPath)} — ${basename(displayRoot())}`
   }
 }
 
@@ -766,12 +808,12 @@ async function doDelete(path: string) {
 // ---------- recents ----------
 
 const RECENTS_KEY = 'jianmo.recents'
-function loadRecents(): { path: string; name: string; time: number }[] {
+function loadRecents(): { path: string; name: string; time: number; kind?: 'dir' | 'file' }[] {
   try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
 }
-function addRecent(root: string) {
-  const list = loadRecents().filter((r) => r.path !== root)
-  list.unshift({ path: root, name: basename(root), time: Date.now() })
+function addRecent(path: string, kind: 'dir' | 'file' = 'dir') {
+  const list = loadRecents().filter((r) => r.path !== path)
+  list.unshift({ path, name: basename(path), time: Date.now(), kind })
   localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 8)))
 }
 function renderRecents() {
@@ -783,11 +825,14 @@ function renderRecents() {
   label.textContent = '最近打开'
   els.recents.append(label)
   for (const r of list) {
+    const isFile = r.kind === 'file'
     const row = document.createElement('div')
     row.className = 'recent-row'
     const icon = document.createElement('span')
     icon.className = 'recent-icon'
-    icon.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>'
+    icon.innerHTML = isFile
+      ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2.5 1.8h6L12 5.3v8.2c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V2.5c0-.4.3-.7.7-.7Z"/><path d="M8.5 1.8v3.5H12" stroke-linecap="round"/></svg>'
+      : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>'
     const box = document.createElement('div')
     box.className = 'recent-text'
     const name = document.createElement('span')
@@ -806,7 +851,7 @@ function renderRecents() {
       localStorage.setItem(RECENTS_KEY, JSON.stringify(loadRecents().filter((x) => x.path !== r.path)))
       renderRecents()
     })
-    row.addEventListener('click', () => void openWorkspace(r.path))
+    row.addEventListener('click', () => void (r.kind === 'file' ? openSingleFile(r.path) : openWorkspace(r.path)))
     row.append(icon, box, remove)
     els.recents.append(row)
   }
@@ -897,23 +942,6 @@ document.addEventListener('mouseup', () => {
   document.body.classList.remove('resizing')
   localStorage.setItem(SIDEBAR_W_KEY, els.sidebar.style.width)
 })
-// 侧栏 footer 的「⋯」菜单：关闭工作空间收进来，footer 更清爽
-els.btnWsMore.addEventListener('click', async (e) => {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const id = await showContextMenu(
-    [
-      { id: 'open-dir', label: '在文件夹中打开' },
-      { id: 'open-other', label: '打开其他文件夹…' },
-      '-',
-      { id: 'close-ws', label: '关闭工作空间' },
-    ],
-    Math.round(r.left),
-    Math.round(r.bottom + 6),
-  )
-  if (id === 'open-dir') { if (state.root) void window.api.openDir(state.root) }
-  else if (id === 'close-ws') void closeWorkspace()
-  else if (id === 'open-other') chooseAndOpen()
-})
 els.btnOpenFolder.addEventListener('click', chooseAndOpen)
 els.btnOpenFile.addEventListener('click', chooseAndOpenFile)
 $('#btn-add-file').addEventListener('click', () => { if (state.root) void createEntry(state.root, 'file') })
@@ -929,7 +957,7 @@ async function chooseAndOpen() {
 
 async function chooseAndOpenFile() {
   const p = await window.api.chooseFile()
-  if (p) void openWorkspace(dirname(p), p)
+  if (p) void openSingleFile(p)
 }
 
 // ---------- menu events ----------
@@ -979,7 +1007,7 @@ window.api.onFsChanged(() => {
 // ---------- open-file (argv / 右键打开 / 二次启动) ----------
 
 window.api.onOpenFile((p) => {
-  if (p) void openWorkspace(dirname(p), p)
+  if (p) void openSingleFile(p)
 })
 
 // ---------- drag & drop（拖入 Markdown 文件直接打开） ----------
@@ -993,7 +1021,7 @@ window.addEventListener('drop', (e) => {
   const path = window.api.pathForFile(first)
   if (!path) return
   if (MD_RE.test(path)) {
-    void openWorkspace(dirname(path), path)
+    void openSingleFile(path)
   } else if (!first.type.startsWith('image/')) {
     // 图片由编辑区的 handleDrop 处理；其余类型明确告知不支持
     setStatus('只能拖入 Markdown 文件（.md）打开', true)
@@ -1004,4 +1032,4 @@ window.addEventListener('drop', (e) => {
 
 renderRecents()
 const initial = await window.api.initialFile()
-if (initial) void openWorkspace(dirname(initial), initial)
+if (initial) void openSingleFile(initial)

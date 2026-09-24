@@ -2,7 +2,7 @@
 
 一个安静的 Markdown 工作空间。基于 **Electron 44** + **Tiptap 3**（含官方 `@tiptap/markdown`）构建，遵循苹果设计语言：大量留白、细腻的字排、克制的色彩。
 
-![技术栈](https://img.shields.io/badge/Electron-44-47848F) ![tiptap](https://img.shields.io/badge/Tiptap-3-blue)
+![技术栈](assets/image20260924201526303.svg) ![tiptap](assets/image20260924201526349.svg)
 
 ## 功能
 

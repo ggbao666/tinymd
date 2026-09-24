@@ -89,9 +89,6 @@
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/><path d="M8 7v4M6 9h4" stroke-linecap="round"/></svg>
             </button>
             <span id="ws-path"></span>
-            <button id="btn-ws-more" class="icon-btn small" title="更多" aria-label="更多操作">
-              <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="3.2" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.8" cy="8" r="1.3"/></svg>
-            </button>
           </div>
           <div id="sidebar-resize" title="拖动调整宽度"></div>
         </aside>
@@ -194,7 +191,7 @@
             <section class="settings-page hidden" data-settings-panel="appearance">
               <div class="settings-page-heading">
                 <h3>外观</h3>
-                <p>选择应用界面使用的颜色模式。</p>
+                <p>选择应用界面使用的颜色模式，以及正文两侧留白的大小。</p>
               </div>
               <div class="settings-group">
                 <div class="settings-group-title">主题</div>
@@ -211,15 +208,15 @@
                 <div class="settings-group-title">版式</div>
                 <label class="settings-option">
                   <input type="radio" name="settings-width" value="narrow" />
-                  <span><strong>窄</strong><small>720px，长文阅读的舒适行宽</small></span>
+                  <span><strong>窄</strong><small>两侧留白 96px，正文更聚拢</small></span>
                 </label>
                 <label class="settings-option">
                   <input type="radio" name="settings-width" value="medium" />
-                  <span><strong>中（默认）</strong><small>736px，图文均衡</small></span>
+                  <span><strong>中（默认）</strong><small>两侧留白 48px，聚拢与贴边均衡</small></span>
                 </label>
                 <label class="settings-option">
                   <input type="radio" name="settings-width" value="wide" />
-                  <span><strong>宽</strong><small>1000px，适合宽表格与大图</small></span>
+                  <span><strong>宽</strong><small>两侧留白 24px，正文更宽，适合宽表格与大图</small></span>
                 </label>
               </div>
             </section>
