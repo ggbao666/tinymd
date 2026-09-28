@@ -1,0 +1,121 @@
+name: Release
+
+# 打 tag（如 v0.1.0）即自动构建 Windows + macOS 安装包并发布 Release。
+# 也可以在 Actions 页面手动触发，用于补发某一版。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的版本号（如 0.1.0）。留空则取 package.json 里的 version'
+        required: false
+        default: ''
+        type: string
+
+# 创建 Release / 上传附件需要写权限
+permissions:
+  contents: write
+
+env:
+  # 本仓库不签名：关掉 electron-builder 的身份自动发现，
+  # 否则 macOS 上会因找不到证书而报错。产物是未签名 dmg，首次打开需右键 -> 打开。
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  build:
+    name: 打包 ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个平台失败不影响另一个，方便看出到底哪个平台有问题
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            os: windows-latest
+            args: --win --x64
+            artifact: windows-x64
+          - label: macOS arm64 + x64
+            os: macos-latest
+            args: --mac --arm64 --x64
+            artifact: macos
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建渲染层
+        run: npm run build
+
+      # 仓库里已提交 build/icon.png、icon.ico、icon-source.svg，
+      # 且与 icon-candidate-25.* 内容一致（md5 相同），
+      # 所以 CI 不跑 npm run build:icon，省掉一次图标工具二进制的下载。
+      - name: 打包安装程序
+        run: npx electron-builder ${{ matrix.args }}
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          path: |
+            release/tinymd-*-setup.exe
+            release/tinymd-*.dmg
+            release/*.blockmap
+            release/latest*.yml
+
+  release:
+    name: 发布 Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 汇总安装包
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # tag 推送 -> 用推送的 tag；手动触发 -> 用输入的版本号；都没有 -> 取 package.json 的 version
+      - name: 计算版本 tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            tag="v${{ inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="v$(node -p "require('./package.json').version")"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "本次发布版本：${tag}"
+
+      - name: 列出待发布文件
+        run: ls -lh artifacts
+
+      - name: 创建 / 更新 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: tinymd ${{ steps.tag.outputs.tag }}
+          files: artifacts/*
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

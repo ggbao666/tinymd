@@ -29,4 +29,8 @@ nsis:
   uninstallerIcon: build/icon.ico
 mac:
   target: dmg
+  # 直接用 1024x1024 的 icon.png，electron-builder 会自行转成 .icns
+  icon: build/icon.png
   category: public.app-category.productivity
+  # 同时出 arm64 与 x64 两个 dmg，产物名必须带架构，否则互相覆盖
+  artifactName: tinymd-${version}-${arch}.${ext}

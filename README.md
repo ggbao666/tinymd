@@ -42,13 +42,37 @@ npm run dev        # Vite 开发服务器 + Electron（带 HMR）
 ## 打包
 
 ```bash
-npm run dist:win   # 打 Windows NSIS 安装包（vite build + electron-builder --win，已内置国内镜像）
+npm run dist:win   # Windows NSIS 安装包（x64）
+npm run dist:mac   # macOS dmg（arm64 + x64，需在 macOS 上执行）
 npm run dist       # 按 electron-builder.yml 默认平台打包
 ```
 
-产物输出到 `release/`（或自定义目录）：`tinymd Setup <版本>.exe` 安装包 + `win-unpacked/` 免安装版。
+产物输出到 `release/`：`tinymd-<版本>-setup.exe`（NSIS 安装包）、`tinymd-<版本>-<架构>.dmg`（macOS 磁盘映像），以及 `win-unpacked/` 免安装版。
 
 已配置 `.md` / `.markdown` 的 `fileAssociations`，打包安装后可在资源管理器双击 / 右键用「tinymd」打开。
+
+## 发布
+
+推一个 tag 就会自动出 Windows + macOS 两套安装包并创建 Release：
+
+```bash
+# 1. 改 package.json 里的 version（如 0.1.0 -> 0.2.0）
+# 2. 提交后打 tag 并推送
+git tag v0.2.0 && git push github v0.2.0
+```
+
+也可以在 GitHub 的 **Actions -> Release -> Run workflow** 手动触发，在 `version` 里填版本号补发某一版。
+
+工作流（`.github/workflows/release.yml`）跑在两个 runner 上：`windows-latest` 出 x64 的 NSIS 安装包，`macos-latest` 出 arm64 与 x64 两个 dmg；两边的安装包汇总后由一个 job 统一创建 Release，避免多平台并发写同一个 Release 打架。
+
+> **macOS 包未签名、未公证**。仓库里没有 Apple 开发者证书，CI 用 `CSC_IDENTITY_AUTO_DISCOVERY=false` 跳过签名，所以首次打开会提示「无法验证开发者」或「已损坏」。放行方式：右键 App 选「打开」，或执行
+> `xattr -dr com.apple.quarantine /Applications/tinymd.app`。
+> 想彻底解决需要配置 Apple Developer ID 证书并走 notarize，那是另一套流程。
+
+### 前置检查
+
+- 仓库 **Settings → Actions → General → Workflow permissions** 需要是 **Read and write permissions**，否则创建 Release 会因为 `GITHUB_TOKEN` 只读而 403（工作流里已声明 `permissions: contents: write`，但仓库设置为只读时无法提权）。
+- CI 里不跑 `npm run build:icon`：`build/icon.png`、`build/icon.ico` 已提交入库，且与 `icon-candidate-25.*` 内容一致，直接在打包时复用。
 
 ## 设计说明
 
@@ -71,5 +95,6 @@ npm run dist       # 按 electron-builder.yml 默认平台打包
 │   ├── tree.ts           # 文件目录树组件
 │   └── style.css         # 苹果风格样式
 ├── sample-workspace/     # 示例工作空间（可直接打开体验）
+├── .github/workflows/    # CI：打 tag 自动构建 Win/macOS 安装包并发布 Release
 └── electron-builder.yml  # 打包配置（含 md 文件关联）
 ```
