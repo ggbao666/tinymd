@@ -60,10 +60,14 @@ npm run dist       # 按 electron-builder.yml 默认平台打包
 推一个 tag 就会自动出 Windows + macOS 安装包并创建 Release：
 
 ```bash
-# 1. 改 package.json 里的 version（如 0.1.0 -> 0.2.0）
+# 1. 改版本号：package.json 与 package-lock.json 里的根级和 packages[""]，共 3 处
+#    （只改 package.json 会让 CI 的 npm ci 报版本不一致）
 # 2. 提交后打 tag 并推送
-git tag v0.2.0 && git push github v0.2.0
+git tag v0.2.1 && git push github v0.2.1
 ```
+
+> 只想验证打包改动、不想发 Release？推一个**名字里带 `-` 的预发布 tag**（如 `v0.2.2-rc.1`），
+> 按工作流里的条件它只构建、不发布。
 
 产出的 Release 附件：
 
@@ -72,9 +76,9 @@ git tag v0.2.0 && git push github v0.2.0
 | Windows | `tinymd-<版本>-setup.exe`（NSIS 安装包）、`tinymd-<版本>-win-unpacked-x64.zip`（免安装版）、`latest.yml` |
 | macOS | `tinymd-<版本>-universal.dmg`（一个 dmg 同时含 arm64 与 x64） |
 
-工作流（`.github/workflows/release.yml`）分三个 job：`windows-latest` 与 `macos-latest` 各自打包并上传 artifact，最后一个 `publish` job 汇总两边的产物、用 `gh release` 统一创建 Release（不并发生成，也不会被两个平台互相覆盖）。
+工作流（`.github/workflows/release.yml`）分三个 job：`windows-latest` 与 `macos-latest` 各自打包并上传 artifact，最后一个 `publish` job 汇总两边的产物、用 `gh release` 统一创建 Release（不并发生成，也不会被两个平台互相覆盖）。macOS 那个 job 在打包后会跑一次签名自检（`codesign --verify --deep --strict`），确保 ad-hoc 签名确实生效且结构完好。
 
-需要重跑时，在 Actions 页面对该 run 点 **Re-run all jobs**；用 **Run workflow** 手动触发时，请把 ref 选成对应的 tag（发布步骤带 `--verify-tag`，tag 不存在会直接报错而不是静默发错版本）。
+需要重跑时，在 Actions 页面对该 run 点 **Re-run all jobs**；用 **Run workflow** 手动触发时，选 tag 会发布、选分支只构建（发布步骤带 `--verify-tag`，tag 不存在会直接报错而不是静默发错版本）。
 
 > 构建步骤里 `--publish never` 不能省。electron-builder 在 CI 环境下检测到 tag 会把发布模式隐式切成 `onTag`，再依据 `package.json` 的 `repository` 字段推断出 GitHub provider，接着因为拿不到 `GH_TOKEN` / `GITHUB_TOKEN` 而报错 —— 表面现象是「打包步骤莫名其妙失败」。发布统一交给 `gh release`，所以显式关掉它的自动发布。
 
@@ -85,10 +89,18 @@ git tag v0.2.0 && git push github v0.2.0
 
 ## macOS 用户必读：首次打开会被拦截
 
-**macOS 包未签名、未公证**（仓库里没有 Apple 开发者证书，CI 用 `CSC_IDENTITY_AUTO_DISCOVERY=false` 跳过签名）。
-注意 electron-builder 在没有证书时不仅跳过签名，**也不会自动做 ad-hoc 签名** —— 所以 dmg 里的 App 是完全未签名的，Gatekeeper 会拦下它：
+**macOS 包带 ad-hoc 签名，但没有 Apple 开发者证书、未公证**。仓库里没有证书，CI 通过
+`mac.identity: "-"` 显式启用 ad-hoc 签名（不写这行的话 electron-builder 找不到证书会直接跳过签名，
+产物反而更差 —— 详见下面「想彻底去掉这个提示」）。
+
+ad-hoc 签名是本地生成的、不需要任何账号的签名，作用有两个：让 App 的签名结构合法
+（Apple Silicon 上未签名的二进制根本不允许运行），以及证明包在签完之后没被改动过。
+但它**不包含开发者身份**，所以 Gatekeeper 依然会拦下它：
 
 > 未打开「tinymd」 — Apple 无法验证「tinymd」是否包含可能危害 Mac 安全或泄漏隐私的恶意软件。
+
+（不同 macOS 版本的文案略有差异，也可能显示为「已损坏」——那只是 Gatekeeper 的措辞，
+不是文件真的坏了。）
 
 **这是预期行为，不是包损坏。** 两种放行方式，任选其一：
 
@@ -122,10 +134,19 @@ xattr -cr /Applications/tinymd.app
   （[Apple 官方说明](https://developer.apple.com/news/?id=saqachfa)），只能用方式 A 或 B。
 - `sudo spctl --master-disable` 那套「允许任何来源」的老办法，在新版 macOS 上已被新的 Gatekeeper 工具堵掉，同样不可用。
 
-### 想彻底去掉这个提示
+### 关于签名的三个档位
 
-需要 Apple Developer Program 账号（$99/年）：用 Developer ID 证书签名 + 提交 Apple 公证（notarize）。
-配好之后用户下载即可双击打开，不再有任何警告。这是独立的一套流程，目前未配置。
+| 签名方式 | 费用 | 用户看到什么 |
+|---|---|---|
+| 不做签名（找不到证书时 electron-builder 的默认行为） | — | 最差：签名结构缺失，对话框可能只剩「移到废纸篓」 |
+| **ad-hoc 签名**（当前采用） | **免费** | 仍被拦一次，按上面方式 A / B 放行 |
+| Developer ID 签名 + Apple 公证 | **$99/年** | 双击直接打开，零警告 |
+
+只有第三档能真正消掉提示：需要 Apple Developer Program 账号（个人也能注册，但证书上会挂真实姓名），
+用 Developer ID 证书签名后提交 Apple 公证（notarize）。这是独立的一套流程，目前未配置。
+
+顺带一提，免费签名的替代渠道基本都已关闭 —— OSSign 的申请通道处于暂停状态，
+Homebrew 自 2026-09 起也不再上架未通过 Gatekeeper 检查的软件。
 
 ## 设计说明
 
