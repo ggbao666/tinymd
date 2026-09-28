@@ -13,7 +13,8 @@
       html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f4f4f2; color: #1b1b26; }
       @media (prefers-color-scheme: dark) { html, body { background: #383a3d; color: #e8e8ea; } }
       .hidden { display: none !important; }
-      #view-welcome { height: 100vh; display: flex; align-items: center; justify-content: center; -webkit-app-region: drag; }
+      #view-welcome { height: 100vh; position: relative; display: flex; align-items: center; justify-content: center; }
+      #welcome-dragbar { position: absolute; top: 0; left: 0; right: 0; height: 38px; -webkit-app-region: drag; }
       #view-welcome button, #view-welcome input, #view-welcome .recents { -webkit-app-region: no-drag; }
       .welcome-inner { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 20px 20px; max-width: 380px; width: 100%; }
       .app-mark { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
@@ -21,8 +22,9 @@
     </style>
   </head>
   <body>
-    <!-- 欢迎页：打开目录才能进入编辑器 -->
+    <!-- 欢迎页：打开文件夹进入工作空间，或直接打开单个 Markdown；整页可接收拖入的 .md -->
     <div id="view-welcome">
+      <div id="welcome-dragbar"></div>
       <div class="welcome-inner">
         <div class="app-mark">
           <svg viewBox="0 0 1024 1024" role="img" aria-label="tinymd">
@@ -225,6 +227,9 @@
         <footer class="settings-footer">设置会自动保存</footer>
       </section>
     </div>
+
+    <!-- 欢迎页没有状态栏，拖入文件的结果用这条浮层提示 -->
+    <div id="welcome-toast" class="welcome-toast hidden" role="status" aria-live="polite"></div>
 
     <input type="file" id="file-input" accept="image/*" multiple hidden />
     <script type="module" src="/main.ts"></script>

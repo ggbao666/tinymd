@@ -35,6 +35,7 @@ const els = {
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
   fileInput: $('#file-input') as HTMLInputElement,
+  welcomeToast: $('#welcome-toast'),
   settingsBackdrop: $('#settings-backdrop'),
   imageSettingsButton: $('#btn-image-settings') as HTMLButtonElement,
   imageCustomPath: $('#image-custom-path'),
@@ -199,6 +200,18 @@ async function refreshTree() {
 
 let statusTimer: number | undefined
 let persistentStatus = ''   // 保存状态：左侧常驻显示，不自动消失
+
+// 欢迎页没有状态栏，同样的提示用页面内的浮条兜底，避免拖入不支持的文件时毫无反馈
+let welcomeToastTimer: number | undefined
+function flashWelcomeToast(text: string, isError = false) {
+  if (els.welcome.classList.contains('hidden')) return
+  els.welcomeToast.textContent = text
+  els.welcomeToast.classList.toggle('error', isError)
+  els.welcomeToast.classList.remove('hidden')
+  clearTimeout(welcomeToastTimer)
+  welcomeToastTimer = window.setTimeout(() => els.welcomeToast.classList.add('hidden'), 2600)
+}
+
 function setStatus(text: string, isError = false) {
   // 保存状态（已保存 / 编辑中…）常驻在左侧；其余为临时提示，2.4s 后回落到保存状态
   if (text === '已保存' || text === '编辑中…') {
@@ -209,6 +222,7 @@ function setStatus(text: string, isError = false) {
     els.status.classList.remove('error')
     return
   }
+  flashWelcomeToast(text, isError)
   els.statusPill.classList.remove('hidden')
   els.status.textContent = text
   els.status.classList.toggle('error', isError)
@@ -307,6 +321,11 @@ async function openWorkspace(root: string, selectFile?: string) {
 // 不把所在文件夹当工作空间，侧栏只保留大纲，底部路径条显示当前文件。
 async function openSingleFile(path: string) {
   await flushSave()
+  // 单文件模式没有工作空间，先把它登记为主进程可读写的文件，否则 fs:read / fs:write 会被拒绝
+  if (!await window.api.allowFile(path)) {
+    setStatus('无法打开该文件：文件不存在或不是 Markdown', true)
+    return
+  }
   state.root = null
   fileMode = true
   document.body.classList.add('file-mode')
@@ -808,13 +827,19 @@ async function doDelete(path: string) {
 // ---------- recents ----------
 
 const RECENTS_KEY = 'jianmo.recents'
+/** 最近打开只保留这么多条（读取时一并修剪历史遗留的超长列表） */
+const RECENTS_MAX = 5
+
 function loadRecents(): { path: string; name: string; time: number; kind?: 'dir' | 'file' }[] {
-  try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]')
+    return Array.isArray(list) ? list.slice(0, RECENTS_MAX) : []
+  } catch { return [] }
 }
 function addRecent(path: string, kind: 'dir' | 'file' = 'dir') {
   const list = loadRecents().filter((r) => r.path !== path)
   list.unshift({ path, name: basename(path), time: Date.now(), kind })
-  localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 8)))
+  localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, RECENTS_MAX)))
 }
 function renderRecents() {
   const list = loadRecents()
@@ -824,6 +849,10 @@ function renderRecents() {
   label.className = 'recents-label'
   label.textContent = '最近打开'
   els.recents.append(label)
+  // 标题留在滚动区外（见 style.css 注释），只有条目这一层滚动
+  const listEl = document.createElement('div')
+  listEl.className = 'recents-list'
+  els.recents.append(listEl)
   for (const r of list) {
     const isFile = r.kind === 'file'
     const row = document.createElement('div')
@@ -853,7 +882,7 @@ function renderRecents() {
     })
     row.addEventListener('click', () => void (r.kind === 'file' ? openSingleFile(r.path) : openWorkspace(r.path)))
     row.append(icon, box, remove)
-    els.recents.append(row)
+    listEl.append(row)
   }
 }
 
@@ -1016,14 +1045,18 @@ window.api.onOpenFile((p) => {
 window.addEventListener('dragover', (e) => e.preventDefault())
 window.addEventListener('drop', (e) => {
   e.preventDefault()
-  const first = Array.from(e.dataTransfer?.files || [])[0]
-  if (!first) return
-  const path = window.api.pathForFile(first)
-  if (!path) return
-  if (MD_RE.test(path)) {
-    void openSingleFile(path)
-  } else if (!first.type.startsWith('image/')) {
-    // 图片由编辑区的 handleDrop 处理；其余类型明确告知不支持
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (!files.length) return
+  // 多选拖入时以第一个 Markdown 为准
+  const target = files
+    .map((f) => window.api.pathForFile(f) || '')
+    .find((p) => MD_RE.test(p))
+  if (target) {
+    void openSingleFile(target)
+    return
+  }
+  // 图片由编辑区的 handleDrop 处理；其余类型明确告知不支持
+  if (files.some((f) => !f.type.startsWith('image/'))) {
     setStatus('只能拖入 Markdown 文件（.md）打开', true)
   }
 })

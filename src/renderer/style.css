@@ -50,16 +50,48 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; bo
 
 /* ============ 欢迎页 ============ */
 
+/* 欢迎页整页都是拖放区（拖入 .md 直接打开）。
+   注意：-webkit-app-region: drag 的区域不会派发鼠标/拖放事件，
+   所以不能把整页设为拖动区，只用顶部 38px（与系统标题栏同高）的一条来拖动窗口。 */
 #view-welcome {
   height: 100vh;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  -webkit-app-region: drag; /* 无边框窗口欢迎页也要能拖动 */
+}
+#welcome-dragbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  -webkit-app-region: drag;
 }
 #view-welcome button,
 #view-welcome input,
 #view-welcome .recents { -webkit-app-region: no-drag; }
+
+/* 欢迎页提示浮层：欢迎页没有底部状态栏，用它兜底显示提示/错误 */
+.welcome-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 400;
+  max-width: calc(100vw - 32px);
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg-sidebar);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  animation: fade-in 0.16s ease;
+}
+.welcome-toast.error { color: var(--danger); }
 
 .welcome-inner {
   display: flex;
@@ -69,7 +101,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; bo
   padding: 20px 20px;
   max-width: 380px;
   width: 100%;
+  max-height: 100vh; /* 永不超出窗口，避免条目多时把上面的图标/标题顶出去 */
 }
+
+/* 固定高度的部分不参与压缩，只让「最近打开」列表让位 */
+.app-mark,
+.welcome-inner h1,
+.entry-links { flex: none; }
 
 .app-mark {
   width: 60px;
@@ -143,17 +181,37 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; bo
 .btn-ghost:hover { background: var(--hover); }
 .btn-ghost.mini { font-size: 12px; padding: 5px 10px; }
 
+/* 最近打开：标题固定在顶部、只有下面的列表滚动。
+   注意「标题在滚动区外面」是刻意的 —— 否则滚动条轨道会从标题顶部开始，
+   滑块顶在「最近打开」这四个字旁边，看着像戳进了标题行。 */
 .recents {
+  --recents-row-h: 49px; /* 一条 = 13px 文件名 + 1px 间距 + 11px 路径 + 上下各 8px 内边距 */
+  --recents-rows: 2; /* 默认只露 2 条，其余在列表内滚动 */
   width: 100%;
   margin-top: 18px;
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .recents-label {
+  flex: none;
   text-align: left;
   color: var(--text-3);
   font-size: 12px;
-  margin: 0 0 6px 12px;
+  padding: 0 0 6px 12px;
   font-weight: 500;
+}
+
+/* 真正滚动的只有这一层：限高 = N 条。
+   flex 项默认 min-height: auto，必须显式置 0 才会真正收缩。 */
+.recents-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: calc(var(--recents-rows) * var(--recents-row-h));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .recent-row {
@@ -932,7 +990,7 @@ body.width-wide { --content-pad: 24px; }
 .ProseMirror pre {
   position: relative;
   background: var(--code-bg);
-  border-radius: 10px;
+  border-radius: 0; /* 与图片一致：不要圆角 */
   padding: 14px 18px;
   overflow-x: auto;
   line-height: 1.6;
@@ -1001,16 +1059,18 @@ body.width-wide { --content-pad: 24px; }
 .ProseMirror img {
   max-width: 100%;
   height: auto;
-  border-radius: 8px;
+  border-radius: 0; /* 不裁圆角：截图类图片自带边框，裁角会破相 */
   margin: 0.4em 0;
   display: block;
 }
 
-/* 图片被选中（点击 / NodeSelection）时的可见高亮 */
+/* 图片被选中（点击 / NodeSelection）时的可见高亮。
+   border-radius 必须和 .ProseMirror img 一致 —— outline 会沿着圆角走，
+   否则图片是直角、选中框却是圆角。 */
 .ProseMirror-selectednode {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 .ProseMirror hr {

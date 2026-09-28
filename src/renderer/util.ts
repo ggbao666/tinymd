@@ -104,6 +104,8 @@ export interface Api {
   chooseFolder(): Promise<string | null>
   chooseFile(): Promise<string | null>
   setRoot(root: string): Promise<boolean>
+  /** 单文件模式：把拖拽 / 双击得到的路径登记为主进程可读写的文件 */
+  allowFile(p: string): Promise<boolean>
   tree(root: string): Promise<TreeNode[]>
   read(p: string): Promise<string>
   write(p: string, content: string): Promise<boolean>

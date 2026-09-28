@@ -20,7 +20,8 @@ const MIME = {
 
 let win = null
 
-// 欢迎页与编辑器使用两套窗口尺寸：欢迎页只够显示内容即可，进入编辑器再放大
+// 欢迎页与编辑器使用两套窗口尺寸：欢迎页只显示 2 条「最近打开」，
+// 更多条目由列表区自己滚动，因此窗口不需要跟着条目变高；进入编辑器再放大
 const WELCOME_W = 480
 const WELCOME_H = 400
 const WORKSPACE_W = 1020
@@ -32,6 +33,7 @@ let currentRoot = null
 let watcher = null
 let watchTimer = null
 const allowedRoots = new Set()
+const allowedFiles = new Set()
 let pendingOpenFile = null
 
 // ---------- helpers ----------
@@ -41,8 +43,42 @@ function insideRoot(root, p) {
   return !rel.startsWith('..') && !path.isAbsolute(rel)
 }
 
+// 单文件模式（拖入 / 双击 / 「打开文件…」/ 命令行参数）没有工作空间，
+// 但仍要能读写这一个文件。只放行确实存在的 Markdown 文件，
+// 避免渲染层把任意路径交给文件系统接口。
+function allowFile(p) {
+  try {
+    const abs = path.resolve(String(p ?? ''))
+    if (!MD_RE.test(abs)) return null
+    if (!fs.statSync(abs).isFile()) return null
+    if (allowedFiles.size > 200) allowedFiles.clear()
+    allowedFiles.add(abs)
+    // 文件所在目录同时作为「可读取媒体目录」：单文件模式下文档旁边的
+    // assets/ 图片要能经 app-file:// 显示（该集合只用于读图和「在文件夹中打开」）
+    allowedRoots.add(path.dirname(abs))
+    return abs
+  } catch { return null }
+}
+
 function assertInside(p) {
-  if (!currentRoot || !insideRoot(currentRoot, p)) throw new Error('路径不在当前工作空间内')
+  const abs = path.resolve(String(p))
+  if (currentRoot && insideRoot(currentRoot, abs)) return abs
+  if (allowedFiles.has(abs)) return abs
+  throw new Error('路径不在当前工作空间内')
+}
+
+// 读取时再放宽一层：单文件模式允许跟随文档里的相对链接跳到同目录的其它 Markdown
+function assertReadable(p) {
+  try { return assertInside(p) } catch (error) {
+    const abs = path.resolve(String(p))
+    if (MD_RE.test(abs)) {
+      const dir = path.dirname(abs)
+      for (const f of allowedFiles) {
+        if (path.dirname(f) === dir) { allowedFiles.add(abs); return abs }
+      }
+    }
+    throw error
+  }
 }
 
 function entryNameError(value) {
@@ -332,14 +368,17 @@ function registerIpc() {
       properties: ['openFile'],
       filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] }],
     })
-    return r.canceled ? null : r.filePaths[0]
+    if (r.canceled || !r.filePaths[0]) return null
+    return allowFile(r.filePaths[0])
   })
 
   ipcMain.handle('workspace:setRoot', (_e, root) => { setWorkspaceRoot(root); return true })
   ipcMain.handle('fs:tree', (_e, root) => listTree(root, 0))
+  // 渲染层拿到的是拖拽/双击等来源的路径，交回主进程登记为可读写文件
+  ipcMain.handle('workspace:allowFile', (_e, p) => !!allowFile(p))
 
   ipcMain.handle('fs:read', async (_e, p) => {
-    assertInside(p)
+    assertReadable(p)
     return (await fsp.readFile(p, 'utf8')).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
   })
 
@@ -409,13 +448,13 @@ function registerIpc() {
     return true
   })
 
-  ipcMain.handle('img:save', async (_e, fileName, data, documentPath, storage) => {
-    if (!currentRoot) throw new Error('尚未打开工作空间')
-    return writeImage(fileName, data, documentPath, storage)
-  })
+  ipcMain.handle('img:save', async (_e, fileName, data, documentPath, storage) => (
+    // 图片落在文档所在目录，权限由 writeImage → imageStorageDirectory → assertInside 把关：
+    // 目录模式落在工作空间内，单文件模式落在该文件所在目录内
+    writeImage(fileName, data, documentPath, storage)
+  ))
 
   ipcMain.handle('img:download', async (_e, url, documentPath, storage) => {
-    if (!currentRoot) throw new Error('尚未打开工作空间')
     if (!/^https?:\/\//i.test(String(url))) throw new Error('只支持下载 HTTP(S) 图片')
     assertInside(documentPath)
     const response = await net.fetch(String(url), { redirect: 'follow' })
@@ -526,8 +565,10 @@ function registerProtocol() {
 // ---------- app lifecycle ----------
 
 function sendOpenFile(p) {
-  if (win && !win.isDestroyed()) win.webContents.send('open-file', p)
-  else pendingOpenFile = p
+  const abs = allowFile(p)
+  if (!abs) return
+  if (win && !win.isDestroyed()) win.webContents.send('open-file', abs)
+  else pendingOpenFile = abs
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -543,7 +584,7 @@ if (!gotLock) {
   app.on('open-file', (_e, p) => { if (MD_RE.test(p)) sendOpenFile(p) })
 
   app.whenReady().then(() => {
-    pendingOpenFile = findFileArg(process.argv)
+    pendingOpenFile = allowFile(findFileArg(process.argv))
     registerProtocol()
     registerIpc()
     buildMenu()

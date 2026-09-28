@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   chooseFolder: () => ipcRenderer.invoke('dialog:chooseFolder'),
   chooseFile: () => ipcRenderer.invoke('dialog:chooseFile'),
   setRoot: (root) => ipcRenderer.invoke('workspace:setRoot', root),
+  allowFile: (p) => ipcRenderer.invoke('workspace:allowFile', p),
   tree: (root) => ipcRenderer.invoke('fs:tree', root),
   read: (p) => ipcRenderer.invoke('fs:read', p),
   write: (p, content) => ipcRenderer.invoke('fs:write', p, content),
