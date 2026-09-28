@@ -77,14 +77,47 @@ git tag v0.2.0 && git push github v0.2.0
 
 > 构建步骤里 `--publish never` 不能省。electron-builder 在 CI 环境下检测到 tag 会把发布模式隐式切成 `onTag`，再依据 `package.json` 的 `repository` 字段推断出 GitHub provider，接着因为拿不到 `GH_TOKEN` / `GITHUB_TOKEN` 而报错 —— 表面现象是「打包步骤莫名其妙失败」。发布统一交给 `gh release`，所以显式关掉它的自动发布。
 
-> **macOS 包未签名、未公证**。仓库里没有 Apple 开发者证书，CI 用 `CSC_IDENTITY_AUTO_DISCOVERY=false` 跳过签名，所以首次打开会提示「无法验证开发者」或「已损坏」。放行方式：右键 App 选「打开」，或执行
-> `xattr -dr com.apple.quarantine /Applications/tinymd.app`。
-> 想彻底解决需要配置 Apple Developer ID 证书并走 notarize，那是另一套流程。
-
 ### 前置检查
 
 - 仓库 **Settings → Actions → General → Workflow permissions** 需要是 **Read and write permissions**，否则 `gh release` 会因 `GITHUB_TOKEN` 只读而 403（工作流里已声明 `permissions: contents: write`，但仓库设置为只读时无法提权）。
 - CI 里不跑 `npm run build:icon`：`build/icon.png`、`build/icon.ico` 已提交入库，且与 `icon-candidate-25.*` 内容一致，直接在打包时复用。改图标后记得本地重跑 `npm run build:icon 25` 再提交。
+
+## macOS 用户必读：首次打开会被拦截
+
+**macOS 包未签名、未公证**（仓库里没有 Apple 开发者证书，CI 用 `CSC_IDENTITY_AUTO_DISCOVERY=false` 跳过签名）。
+注意 electron-builder 在没有证书时不仅跳过签名，**也不会自动做 ad-hoc 签名** —— 所以 dmg 里的 App 是完全未签名的，Gatekeeper 会拦下它：
+
+> 未打开「tinymd」 — Apple 无法验证「tinymd」是否包含可能危害 Mac 安全或泄漏隐私的恶意软件。
+
+**这是预期行为，不是包损坏。** 两种放行方式，任选其一：
+
+### 方式 A：系统设置（Apple 官方途径，推荐）
+
+1. 从这个对话框点 **「完成」** —— 不要点「移到废纸篓」。
+2. 打开 **系统设置 → 隐私与安全性**，向下滚动到「**安全性**」区域。
+3. 会看到一条「已阻止使用「tinymd」，因为来自身份不明的开发者」，点它旁边的 **「仍要打开」**。
+4. 弹窗里再点一次 **「打开」**，然后输入密码 / Touch ID 确认。
+
+批准一次即可，之后双击就能正常打开（系统会把它记为例外）。
+
+### 方式 B：终端清掉隔离标记（更快）
+
+先把 App 从 dmg 拖进「应用程序」，然后执行：
+
+```bash
+xattr -cr /Applications/tinymd.app
+```
+
+### 两个常见误区
+
+- ⚠️ **不要再按老教程「右键 → 打开」**。Apple 已在 macOS 15 (Sequoia) 起**移除**了 Control-click 覆盖 Gatekeeper 的能力
+  （[Apple 官方说明](https://developer.apple.com/news/?id=saqachfa)），只能用方式 A 或 B。
+- `sudo spctl --master-disable` 那套「允许任何来源」的老办法，在新版 macOS 上已被新的 Gatekeeper 工具堵掉，同样不可用。
+
+### 想彻底去掉这个提示
+
+需要 Apple Developer Program 账号（$99/年）：用 Developer ID 证书签名 + 提交 Apple 公证（notarize）。
+配好之后用户下载即可双击打开，不再有任何警告。这是独立的一套流程，目前未配置。
 
 ## 设计说明
 
