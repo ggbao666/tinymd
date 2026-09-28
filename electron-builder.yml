@@ -36,3 +36,13 @@ mac:
   # 产物名带架构：--universal 时是 tinymd-<版本>-universal.dmg，
   # 若改回分别打 arm64/x64，也不会互相覆盖
   artifactName: tinymd-${version}-${arch}.${ext}
+  # 没有 Apple 证书，显式启用 ad-hoc 签名（免费，不需要任何账号）。
+  # 不写这一行时 electron-builder 找不到证书会「完全跳过签名」，产物在 Gatekeeper
+  # 眼里属于「未签名」——它比 ad-hoc 更糟：签名结构缺失/不完整，对话框可能连
+  # 「打开」都不给，只剩「移到废纸篓」。ad-hoc 只证明「签完之后没被改过」、
+  # 不代表身份，依旧过不了 Gatekeeper，但判定会走到「弹一次确认框、可放行」。
+  #
+  # hardenedRuntime 默认 true，ad-hoc 下会强制库验证，进而拒绝 Team ID 不同的
+  # 预签名 Electron 框架导致启动崩溃；所需的 disable-library-validation 键
+  # electron-builder 内置的 entitlements 模板已包含，无需自备 plist。
+  identity: "-"

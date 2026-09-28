@@ -1,7 +1,7 @@
 {
   "name": "tinymd",
   "productName": "tinymd",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "tinymd — 一个安静的 Markdown 工作空间",
   "main": "main.js",
   "author": "weiwenjie",

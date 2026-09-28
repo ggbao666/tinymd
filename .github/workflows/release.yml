@@ -1,8 +1,9 @@
 name: Release
 
-# 推 tag（如 v0.1.0）即构建 Windows / macOS 安装包并发布 Release。
+# 推正式 tag（如 v0.2.1）即构建 Windows / macOS 安装包并发布 Release。
+# 预发布 tag（名字里带 "-"，如 v0.2.1-rc.1）只构建、不发布，用来验证打包改动。
 # 需要重跑时，在 Actions 页面对该 run 点 "Re-run all jobs"；
-# 用 Run workflow 手动触发时，请把 ref 选成对应的 tag（发布任务带 --verify-tag 校验）。
+# 用 Run workflow 手动触发时，选 tag 会发布、选分支只构建。
 on:
   push:
     tags:
@@ -87,8 +88,23 @@ jobs:
       - name: 打包通用版 dmg
         run: npx electron-builder --mac --universal --publish never
         env:
-          # 仓库没有 Apple 证书：跳过签名，产出未签名 dmg
+          # 不去钥匙串里找证书：配合 mac.identity: "-" 确保走 ad-hoc 签名路径
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      # 自检产物确实被 ad-hoc 签上、且签名结构完好（既不是「未签名」也不是「签名损坏」）。
+      # ad-hoc 过不了 Gatekeeper 是预期结果，所以 spctl 只打印、不参与断言；
+      # 这里真正要守住的是「签名没被改坏」——那种状态下用户的对话框连「打开」都不给。
+      - name: 校验 ad-hoc 签名
+        run: |
+          set -euo pipefail
+          APP=$(find release -maxdepth 3 -name "tinymd.app" -type d | head -1)
+          if [ -z "$APP" ]; then echo "没找到 tinymd.app"; exit 1; fi
+          echo "app: $APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Identifier|Format|Signature|TeamIdentifier|Runtime' || true
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "spctl 评估（ad-hoc 预期 rejected）："
+          spctl --assess --type execute --verbose=2 "$APP" 2>&1 || true
+          echo "::notice title=macOS 签名自检::$(codesign -dv "$APP" 2>&1 | grep -E 'Signature=|Identifier=|TeamIdentifier=|Runtime' | tr '\n' ' ')"
 
       - name: 上传安装包
         uses: actions/upload-artifact@v7
@@ -104,6 +120,8 @@ jobs:
     needs:
       - build-windows
       - build-macos
+    # 只有正式 tag 才发布：预发布 tag（名字带 "-"）和手动选分支跑时只构建
+    if: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
