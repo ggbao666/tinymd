@@ -20,8 +20,9 @@ fileAssociations:
 win:
   target: nsis
   icon: build/icon.ico
-electronDownload:
-  mirror: https://npmmirror.com/mirrors/electron/
+# 国内镜像不放这里：@electron/get 的镜像优先级是「环境变量 > 配置」，
+# 写进配置文件会让 CI（GitHub 海外 runner）也去访问 npmmirror。
+# 镜像改由 npm run dist:win / dist:mac 通过 ELECTRON_MIRROR 传入，CI 走官方源。
 nsis:
   perMachine: false
   artifactName: tinymd-${version}-setup.${ext}
@@ -32,5 +33,6 @@ mac:
   # 直接用 1024x1024 的 icon.png，electron-builder 会自行转成 .icns
   icon: build/icon.png
   category: public.app-category.productivity
-  # 同时出 arm64 与 x64 两个 dmg，产物名必须带架构，否则互相覆盖
+  # 产物名带架构：--universal 时是 tinymd-<版本>-universal.dmg，
+  # 若改回分别打 arm64/x64，也不会互相覆盖
   artifactName: tinymd-${version}-${arch}.${ext}

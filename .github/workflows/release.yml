@@ -1,51 +1,28 @@
 name: Release
 
-# 打 tag（如 v0.1.0）即自动构建 Windows + macOS 安装包并发布 Release。
-# 也可以在 Actions 页面手动触发，用于补发某一版。
+# 推 tag（如 v0.1.0）即构建 Windows / macOS 安装包并发布 Release。
+# 需要重跑时，在 Actions 页面对该 run 点 "Re-run all jobs"；
+# 用 Run workflow 手动触发时，请把 ref 选成对应的 tag（发布任务带 --verify-tag 校验）。
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
-    inputs:
-      version:
-        description: '要发布的版本号（如 0.1.0）。留空则取 package.json 里的 version'
-        required: false
-        default: ''
-        type: string
 
-# 创建 Release / 上传附件需要写权限
+# 构建任务只需要读权限，写权限只给最后的发布任务
 permissions:
-  contents: write
-
-env:
-  # 本仓库不签名：关掉 electron-builder 的身份自动发现，
-  # 否则 macOS 上会因找不到证书而报错。产物是未签名 dmg，首次打开需右键 -> 打开。
-  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  contents: read
 
 jobs:
-  build:
-    name: 打包 ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # 一个平台失败不影响另一个，方便看出到底哪个平台有问题
-      fail-fast: false
-      matrix:
-        include:
-          - label: Windows x64
-            os: windows-latest
-            args: --win --x64
-            artifact: windows-x64
-          - label: macOS arm64 + x64
-            os: macos-latest
-            args: --mac --arm64 --x64
-            artifact: macos
+  build-windows:
+    name: 打包 Windows
+    runs-on: windows-latest
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 准备 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -59,63 +36,100 @@ jobs:
       - name: 构建渲染层
         run: npm run build
 
-      # 仓库里已提交 build/icon.png、icon.ico、icon-source.svg，
-      # 且与 icon-candidate-25.* 内容一致（md5 相同），
-      # 所以 CI 不跑 npm run build:icon，省掉一次图标工具二进制的下载。
-      - name: 打包安装程序
-        run: npx electron-builder ${{ matrix.args }}
+      # --publish never 必须显式写：electron-builder 在 CI 里检测到 tag 会把发布模式
+      # 隐式切成 onTag，再依据 package.json 的 repository 字段认出 GitHub，
+      # 然后因为拿不到 GH_TOKEN / GITHUB_TOKEN 直接报错 —— 表现出「打包步骤莫名失败」。
+      # 发布统一交给下面的 publish 任务（gh release）来做。
+      - name: 打包 NSIS 安装包
+        run: npx electron-builder --win --x64 --publish never
+
+      # 免安装版直接压缩上一步产出的 win-unpacked，不再重复跑一次 --dir 构建
+      - name: 压缩免安装版
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          Compress-Archive -Path release/win-unpacked `
+            -DestinationPath "release/tinymd-$version-win-unpacked-x64.zip" -Force
 
       - name: 上传安装包
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
+          name: tinymd-windows
           if-no-files-found: error
           path: |
-            release/tinymd-*-setup.exe
-            release/tinymd-*.dmg
-            release/*.blockmap
+            release/*.exe
+            release/tinymd-*-win-unpacked-*.zip
             release/latest*.yml
 
-  release:
-    name: 发布 Release
-    needs: build
-    runs-on: ubuntu-latest
+  build-macos:
+    name: 打包 macOS
+    runs-on: macos-latest
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: 汇总安装包
-        uses: actions/download-artifact@v4
+      - name: 准备 Node
+        uses: actions/setup-node@v7
         with:
-          path: artifacts
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建渲染层
+        run: npm run build
+
+      # --universal：一个 dmg 同时含 arm64 与 x64
+      - name: 打包通用版 dmg
+        run: npx electron-builder --mac --universal --publish never
+        env:
+          # 仓库没有 Apple 证书：跳过签名，产出未签名 dmg
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v7
+        with:
+          name: tinymd-macos
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/latest*.yml
+
+  publish:
+    name: 发布 Release
+    needs:
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 汇总安装包
+        uses: actions/download-artifact@v8
+        with:
+          pattern: tinymd-*
+          path: release
           merge-multiple: true
 
-      # tag 推送 -> 用推送的 tag；手动触发 -> 用输入的版本号；都没有 -> 取 package.json 的 version
-      - name: 计算版本 tag
-        id: tag
-        shell: bash
+      - name: 列出待发布文件
+        run: ls -lh release
+
+      - name: 创建或更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
-            tag="v${{ inputs.version }}"
-          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            tag="${GITHUB_REF_NAME}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/* --clobber
           else
-            tag="v$(node -p "require('./package.json').version")"
+            gh release create "$RELEASE_TAG" release/* \
+              --verify-tag \
+              --title "tinymd $RELEASE_TAG" \
+              --generate-notes
           fi
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-          echo "本次发布版本：${tag}"
-
-      - name: 列出待发布文件
-        run: ls -lh artifacts
-
-      - name: 创建 / 更新 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: tinymd ${{ steps.tag.outputs.tag }}
-          files: artifacts/*
-          draft: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
