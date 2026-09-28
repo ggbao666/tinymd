@@ -131,6 +131,7 @@ const editorCtl: EditorCtl = createEditor(els.editor, {
         mark('italic', '斜体', '*斜体*'),
         mark('code', '行内代码', '`代码`'),
         mark('strike', '删除线', '~~删除~~'),
+        mark('highlight', '高亮', '==高亮=='),
       ],
       x,
       y,

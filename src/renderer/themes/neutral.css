@@ -16,6 +16,8 @@ html.theme-neutral {
   --code-bg: rgba(255, 255, 255, 0.075);
   --inline-code-bg: rgba(255, 255, 255, 0.08);
   --inline-code-text: #f0f0f1;
+  /* ==高亮== 底色：深色下用半透明暖黄，白字仍可读 */
+  --mark-bg: rgba(255, 214, 10, 0.28);
   /* 语法高亮：GitHub Dark 官方色板 */
   --syn-keyword: #ff7b72;
   --syn-string: #a5d6ff;

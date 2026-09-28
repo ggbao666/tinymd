@@ -959,6 +959,16 @@ body.width-wide { --content-pad: 24px; }
   padding: 0.15em 0.4em;
 }
 
+/* ==高亮== 渲染成 <mark>。按项目约定内容元素不加圆角（同图片、代码块）。 */
+.ProseMirror mark {
+  background: var(--mark-bg);
+  color: inherit;
+  padding: 0.06em 0.15em;
+  /* 跨行时每行都补上左右内边距，否则换行后的那截会贴着文字 */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
 #source-wrap {
   flex: 1;
   min-height: 0;

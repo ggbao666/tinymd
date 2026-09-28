@@ -4,6 +4,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
+import { Highlight } from '@tiptap/extension-highlight'
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
 import { BubbleMenu } from '@tiptap/extension-bubble-menu'
 import { Placeholder } from '@tiptap/extensions'
@@ -136,6 +137,10 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         // 换成 lowlight 版代码块（语法高亮），语言角标 data-language 行为不变
         codeBlock: false,
       }),
+      // ==高亮==：StarterKit 不含，需单独注册。
+      // 该扩展自带 ==文本== 的输入规则、粘贴规则、Mod-Shift-h 快捷键，
+      // 以及 markdownTokenizer + parse/renderMarkdown，读写 .md 时能原样往返。
+      Highlight,
       CodeBlockLangBadge.configure({ lowlight }),
       CodeBlockBackspace,
       TaskList,
@@ -249,6 +254,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     else if (action === 'italic') c.toggleItalic().run()
     else if (action === 'code') c.toggleCode().run()
     else if (action === 'strike') c.toggleStrike().run()
+    else if (action === 'highlight') c.toggleHighlight().run()
   })
 
   // 点代码块右上角语言角标 → 弹出语言菜单（角标是 ::after 伪元素，按命中区域判断）
@@ -439,6 +445,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         case 'italic': return c.toggleItalic().run()
         case 'code': return c.toggleCode().run()
         case 'strike': return c.toggleStrike().run()
+        case 'highlight': return c.toggleHighlight().run()
       }
       return false
     },
@@ -449,6 +456,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       if (editor.isActive('italic')) out.push('italic')
       if (editor.isActive('code')) out.push('code')
       if (editor.isActive('strike')) out.push('strike')
+      if (editor.isActive('highlight')) out.push('highlight')
       return out
     },
     currentLink(): string | null {

@@ -25,6 +25,8 @@ html.theme-light {
   --code-bg: rgba(38, 38, 42, 0.055);
   --inline-code-bg: rgba(38, 38, 42, 0.065);
   --inline-code-text: #26262a;
+  /* ==高亮== 底色：浅色下就是常规荧光笔黄 */
+  --mark-bg: rgba(255, 214, 10, 0.55);
 
   /* 语法高亮：GitHub Light 官方色板 */
   --syn-keyword: #cf222e;
