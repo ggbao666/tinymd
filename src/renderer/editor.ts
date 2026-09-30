@@ -1,4 +1,5 @@
 import { Editor, Extension, mergeAttributes } from '@tiptap/core'
+import type { JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
@@ -65,12 +66,16 @@ function moveCaretOverImage(editor: Editor, dir: 'up' | 'down'): boolean {
   return true
 }
 
-/** 图片：文档内保留 Markdown 里的相对路径，渲染时解析为本地媒体 URL */
-const ResolvedImage = Image.extend({
+/**
+ * 图片：文档内保留 Markdown 里的相对路径，渲染时解析为本地媒体 URL。
+ * 目录以函数形式传入：主编辑器取「当前打开的文档目录」，离线渲染（导出别的文件）
+ * 取那份文件自己的目录，两边互不影响。
+ */
+const makeResolvedImage = (dir: () => string) => Image.extend({
   renderHTML({ node, HTMLAttributes }) {
     const src = String(node.attrs.src || '')
     const attrs = { ...HTMLAttributes }
-    if (src && !/^(https?:|app-file:|data:)/i.test(src)) attrs.src = toMediaUrl(resolveRel(currentDir, src))
+    if (src && !/^(https?:|app-file:|data:)/i.test(src)) attrs.src = toMediaUrl(resolveRel(dir(), src))
     return ['img', attrs]
   },
 })
@@ -122,6 +127,82 @@ const CodeBlockBackspace = Extension.create({
   },
 })
 
+/**
+ * 内容相关扩展：主编辑器与离线渲染共用，保证两者产出的 HTML 完全一致。
+ * 交互相关的扩展（气泡菜单、占位符、斜杠菜单）不在这里 —— 离线渲染不需要，
+ * 挂了反而会和主编辑器抢同一批 DOM。
+ */
+function contentExtensions(dir: () => string) {
+  return [
+    StarterKit.configure({
+      link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
+      heading: { levels: [1, 2, 3, 4, 5, 6] },
+      // 换成 lowlight 版代码块（语法高亮），语言角标 data-language 行为不变
+      codeBlock: false,
+    }),
+    // ==高亮==：StarterKit 不含，需单独注册。
+    // 该扩展自带 ==文本== 的输入规则、粘贴规则、Mod-Shift-h 快捷键，
+    // 以及 markdownTokenizer + parse/renderMarkdown，读写 .md 时能原样往返。
+    Highlight,
+    CodeBlockLangBadge.configure({ lowlight }),
+    CodeBlockBackspace,
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    makeResolvedImage(dir).configure({ inline: false, allowBase64: false }),
+    Table.configure({ resizable: false }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    Markdown.configure({ indentation: { style: 'space', size: 2 } }),
+  ]
+}
+
+/**
+ * 离线渲染的公共前半段：起一个 element 是游离 div 的无头 Tiptap，
+ * 灌入 Markdown 后交给 fn 取结果，用完 destroy。
+ *
+ * 关键依据：`getHTML()` / `getJSON()` 都是从**文档模型 + schema** 生成的
+ * （`getHTMLFromFragment(doc.content, schema)`），**不依赖视图**，所以无头实例完全可行。
+ * 与编辑器同一批扩展 + 同一个 `setContent(..., { contentType: 'markdown' })` 入口，
+ * 所以结果和「先打开它再操作」逐字节相同。host 是游离节点，不接入文档，不影响页面布局。
+ *
+ * fileDir 是**目标文档自己的目录**，用闭包注入（不是模块级共享变量）——
+ * 这是「导出任意一篇而不切换当前文档」的前提。
+ */
+function withOfflineEditor<T>(markdown: string, fileDir: string, fn: (editor: Editor) => T): T {
+  const editor = new Editor({
+    element: document.createElement('div'),
+    extensions: contentExtensions(() => fileDir),
+    content: '',
+  })
+  try {
+    editor.commands.setContent(normalizeMarkdownImagePaths(markdown), { contentType: 'markdown', emitUpdate: false })
+    return fn(editor)
+  } finally {
+    editor.destroy()
+  }
+}
+
+/**
+ * 离线渲染成 HTML —— **导出 PDF 的唯一渲染入口**
+ * （当前文档、别的文件都走这里，见 main.ts 的 exportPath），
+ * 全程不碰当前打开的文档，也不依赖编辑模式。
+ */
+export function markdownToHtml(markdown: string, fileDir: string): string {
+  return withOfflineEditor(markdown, fileDir, (editor) => editor.getHTML())
+}
+
+/**
+ * 离线渲染成文档模型 —— **导出 Word 的唯一入口**。
+ * 与 HTML 那条路同一个入口、同一批扩展，只有出口不同。
+ * 之所以给 docx 用 JSON 而不是 HTML：扩展集是封闭的，JSON 里
+ * `taskItem.attrs.checked`、`codeBlock.attrs.language`、`marks` 都是现成字段，
+ * 走 HTML 反而要从 data-* / class 里倒推语义。
+ */
+export function markdownToDoc(markdown: string, fileDir: string): JSONContent {
+  return withOfflineEditor(markdown, fileDir, (editor) => editor.getJSON())
+}
+
 export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
   // 气泡菜单元素在 index.html 中静态声明；显隐由插件用 visibility 控制，
   // 必须摘掉 hidden class（display:none 会永久压制插件）
@@ -130,28 +211,10 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
 
   const editor = new Editor({
     element: host,
+    // 内容扩展与离线渲染共用；只在这里额外挂交互扩展。
     extensions: [
-      StarterKit.configure({
-        link: { openOnClick: false, autolink: true, defaultProtocol: 'https' },
-        heading: { levels: [1, 2, 3, 4, 5, 6] },
-        // 换成 lowlight 版代码块（语法高亮），语言角标 data-language 行为不变
-        codeBlock: false,
-      }),
-      // ==高亮==：StarterKit 不含，需单独注册。
-      // 该扩展自带 ==文本== 的输入规则、粘贴规则、Mod-Shift-h 快捷键，
-      // 以及 markdownTokenizer + parse/renderMarkdown，读写 .md 时能原样往返。
-      Highlight,
-      CodeBlockLangBadge.configure({ lowlight }),
-      CodeBlockBackspace,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      ResolvedImage.configure({ inline: false, allowBase64: false }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
+      ...contentExtensions(() => currentDir),
       Placeholder.configure({ placeholder: '开始写点什么…' }),
-      Markdown.configure({ indentation: { style: 'space', size: 2 } }),
       BubbleMenu.configure({
         element: bubbleEl,
         shouldShow: ({ state, view }) => {

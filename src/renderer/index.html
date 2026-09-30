@@ -58,6 +58,15 @@
           <div id="breadcrumb"></div>
         </div>
         <div class="topbar-right">
+          <!-- 文档目录：和「纯文本模式 / 设置」同一排，点一下展开、再点一下收起
+               （Ctrl/Cmd + Shift + O 同效，Esc 也能收起）。展开时目录从右边摊进编辑区、
+               正文让出 246px，窗口一像素不动。
+               ⚠️ 它曾经是 absolute 定位挂在 #content 上、落在正文右侧那条留白里；
+               现在归到标题栏这一组，位置交给 .topbar-right 的 flex + gap 排，
+               所以 CSS 里不再有 --toc-btn-w / --toc-btn-right 那套算式。 -->
+          <button id="btn-toc" class="icon-btn" title="文档目录 (Ctrl/Cmd + Shift + O)" aria-label="文档目录" aria-pressed="false">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h9M5.5 8h9M5.5 12h9"/><circle cx="2.4" cy="4" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>
+          </button>
           <button id="btn-source-mode" class="icon-btn" title="切换到纯文本模式" aria-label="切换到纯文本模式" aria-pressed="false">
             <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 4.5-4 4.5 4 4.5M11.5 4.5l4 4.5-4 4.5M10.2 3.2 7.8 14.8"/></svg>
           </button>
@@ -69,19 +78,7 @@
 
       <div class="ws-body">
         <aside id="sidebar">
-          <div id="sidebar-header">
-            <div id="sidebar-tabs">
-              <button id="tab-files" class="side-tab active">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>
-                文件
-              </button>
-              <button id="tab-outline" class="side-tab">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h9M5.5 8h9M5.5 12h9"/><circle cx="2.4" cy="4" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>
-                大纲
-              </button>
-            </div>
-          </div>
-          <div id="outline"></div>
+          <div id="sidebar-files-label">文件</div>
           <div id="tree"></div>
           <div id="sidebar-footer">
             <button id="btn-add-file" class="icon-btn small" title="新建文件">
@@ -113,6 +110,11 @@
             <span id="status"></span>
             <span id="count"></span>
           </div>
+
+          <!-- 文档目录面板：往编辑区里摊开（正文让出 246px），开关按钮在标题栏上 -->
+          <aside id="toc-float" aria-label="文档目录" aria-hidden="true">
+            <div id="toc-float-list"></div>
+          </aside>
         </main>
       </div>
     </div>
@@ -194,7 +196,7 @@
             <section class="settings-page hidden" data-settings-panel="appearance">
               <div class="settings-page-heading">
                 <h3>外观</h3>
-                <p>选择应用界面使用的颜色模式，以及正文两侧留白的大小。</p>
+                <p>选择应用界面使用的颜色模式。</p>
               </div>
               <div class="settings-group">
                 <div class="settings-group-title">主题</div>
@@ -205,21 +207,6 @@
                 <label class="settings-option">
                   <input type="radio" name="settings-theme" value="light" />
                   <span><strong>亮色</strong><small>与暗色同一套灰调的柔和浅色，不刺眼</small></span>
-                </label>
-              </div>
-              <div class="settings-group">
-                <div class="settings-group-title">版式</div>
-                <label class="settings-option">
-                  <input type="radio" name="settings-width" value="narrow" />
-                  <span><strong>窄</strong><small>两侧留白 96px，正文更聚拢</small></span>
-                </label>
-                <label class="settings-option">
-                  <input type="radio" name="settings-width" value="medium" />
-                  <span><strong>中（默认）</strong><small>两侧留白 48px，聚拢与贴边均衡</small></span>
-                </label>
-                <label class="settings-option">
-                  <input type="radio" name="settings-width" value="wide" />
-                  <span><strong>宽</strong><small>两侧留白 24px，正文更宽，适合宽表格与大图</small></span>
                 </label>
               </div>
             </section>

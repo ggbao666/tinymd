@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   allowImageDirectory: (directory) => ipcRenderer.invoke('img:allowDirectory', directory),
   saveImage: (fileName, data, documentPath, storage) => ipcRenderer.invoke('img:save', fileName, data, documentPath, storage),
   downloadImage: (url, documentPath, storage) => ipcRenderer.invoke('img:download', url, documentPath, storage),
+  exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
+  exportDocx: (payload) => ipcRenderer.invoke('export:docx', payload),
+  setExportEnabled: (enabled) => ipcRenderer.invoke('ui:exportState', enabled),
 
   openExternal: (url) => ipcRenderer.invoke('ui:openExternal', url),
   clipboard: (action) => ipcRenderer.invoke('ui:clipboard', action),
@@ -35,11 +38,16 @@ contextBridge.exposeInMainWorld('api', {
   setTheme: (mode) => ipcRenderer.invoke('ui:theme', mode),
   openImageViewer: (src, title) => ipcRenderer.invoke('ui:imageViewer', { src, title }),
   imageViewerData: () => ipcRenderer.invoke('ui:imageViewerData'),
+  openInNewWindow: (p) => ipcRenderer.invoke('window:standalone', p),
+  claimDocument: (p) => ipcRenderer.invoke('doc:claim', p),
+  releaseDocument: () => ipcRenderer.invoke('doc:release'),
+  documentOwner: (p) => ipcRenderer.invoke('doc:owner', p),
 
   initialFile: () => ipcRenderer.invoke('app:initialFile'),
   resizeWindow: (mode) => ipcRenderer.invoke('ui:resize', mode),
 
   onFsChanged: (cb) => on('fs:changed', cb),
+  onThemeChanged: (cb) => on('theme:changed', cb),
   onMenu: (cb) => on('menu', cb),
   onOpenFile: (cb) => on('open-file', cb),
 })

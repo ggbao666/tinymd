@@ -1,0 +1,71 @@
+/*
+ * 导出 PDF 专用样式。
+ *
+ * 只在导出时创建的隐藏窗口里注入（经 ?inline 以字符串形式取到），不参与主界面渲染，
+ * 注入顺序排在 style.css 之后，同级选择器直接覆盖，不需要 !important。
+ *
+ * 正文排版整体复用 style.css 的 .ProseMirror 规则：导出页把内容包进
+ * <div class="ProseMirror">，标题、列表、代码块、表格、图片的样式与编辑器完全一致。
+ * 这里只处理屏幕上不成问题、落到纸上会出问题的地方。
+ */
+
+/* 外壳摊平：主界面是 100vh + overflow:hidden 的应用布局，纸面上要能一直流到下一页。
+   底色用纯白 —— --bg 的浅灰整页铺开会显得脏，层次交给代码块和表格的底色表现。 */
+html, body {
+  display: block;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  background: #fff;
+}
+
+/* 让代码块底色、==高亮==、表头底色照常输出（默认会被打印样式剥离） */
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* 代码块：屏幕上靠横向滚动查看，纸上会把超出的部分直接裁掉，必须改成折行 */
+.ProseMirror pre {
+  overflow-x: visible;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* 语言角标是 ::after 伪元素、content 无条件生效，会跟着印到纸上；
+   它还是绝对定位的，跨页时会飘到奇怪的位置，直接关掉。
+   注意要连属性选择器那几条一起覆盖 —— .ProseMirror pre[data-language]::after
+   的特异性高于 .ProseMirror pre::after，只写后者盖不住（已实测踩过）。 */
+.ProseMirror pre::after,
+.ProseMirror pre[data-language]::after,
+.ProseMirror pre:hover::after,
+.ProseMirror pre[data-language]:hover::after {
+  content: none;
+}
+
+/* 分页：整块内容尽量不跨页，标题不要留在页尾当孤儿 */
+.ProseMirror pre,
+.ProseMirror blockquote,
+.ProseMirror img,
+.ProseMirror table {
+  break-inside: avoid;
+}
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  break-after: avoid;
+}
+
+/* 链接在纸上点不了，补一道下划线示意 */
+.ProseMirror a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 屏幕上表格行有悬停底色，纸面不该出现 */
+.ProseMirror tbody tr:hover td {
+  background: none;
+}

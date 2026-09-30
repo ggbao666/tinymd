@@ -1,7 +1,11 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, protocol, nativeTheme, net } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, protocol, nativeTheme, net, screen } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
+// 导出 Word 的映射器（ProseMirror 文档模型 → docx）。
+// 单独一个文件：它是一套「把 style.css 的数值翻译成 Word 排版元素」的翻译表，
+// 塞进 main.js 会把这边的窗口/菜单逻辑淹掉。⚠️ 记得同步 electron-builder.yml 的 files。
+const { buildDocx } = require('./docx-export.cjs')
 
 const isDev = !app.isPackaged
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || ''
@@ -18,14 +22,32 @@ const MIME = {
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.avif': 'image/avif', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
 }
 
-let win = null
+let win = null                 // 主窗口
+// 所有编辑器窗口（主窗口 + 独立窗口）：广播（文件变更、主题）按它遍历，
+// 导出用的隐藏打印窗口不在其中。
+const editorWindows = new Set()
+// webContents.id -> 启动时要打开的文件。独立窗口靠它拿到目标文档，
+// 主窗口也占一个（值为待打开文件或 null），这样 app:initialFile 是窗口级的。
+const windowInitialFile = new Map()
 
 // 欢迎页与编辑器使用两套窗口尺寸：欢迎页只显示 2 条「最近打开」，
-// 更多条目由列表区自己滚动，因此窗口不需要跟着条目变高；进入编辑器再放大
+// 更多条目由列表区自己滚动，因此窗口不需要跟着条目变高；进入编辑器再放大。
+// ⚠️ 最小宽度也跟着分两套：工作区 600、欢迎页 460（欢迎页本身只有 480 宽，拿 600
+// 去卡它连创建都别扭）。两者在 ui:resize 里随尺寸一起切换 —— 换尺寸前必须先松最小宽度，
+// 否则从工作区退回欢迎页会被 600 卡住、窗口缩不到 480。
+// 面板互不互斥**不归这里管**：渲染层那条 PANELS_EXCLUSIVE_W(800) 说的是
+// 「窗口窄到 800 以下，左右两块面板只能开一块」，跟「窗口能被拖到多窄」是两件事。
+// ⚠️ WORKSPACE_W 是「侧栏 264 + 编辑区 + 目录 246」一起住的那个宽度：
+// 1000 时两块同开，正文可用 = 1000 - 264 - 246 - 滚动条 10 = 480，正好抵在渲染层的
+// EDITOR_MIN(480) 上（侧栏一分都不用让）；窗口再窄一点，侧栏才开始让出宽度。
+// （历史上是 1020 → 1180 → 1200 → 1000，这次按用户要求收窄到 1000。）
 const WELCOME_W = 480
+const WELCOME_MIN_W = 460
 const WELCOME_H = 400
-const WORKSPACE_W = 1020
+const WORKSPACE_W = 1000
+const WORKSPACE_MIN_W = 600
 const WORKSPACE_H = 680
+const WINDOW_MIN_H = 380
 
 const imageViewerWindows = new Set()
 const imageViewerData = new Map()
@@ -132,7 +154,8 @@ async function listTree(dir, depth) {
 
 function onFsEvent() {
   clearTimeout(watchTimer)
-  watchTimer = setTimeout(() => { if (win && !win.isDestroyed()) win.webContents.send('fs:changed') }, 250)
+  // 广播而非只发主窗口：独立窗口开着同一工作空间里的文件时也要跟着刷新
+  watchTimer = setTimeout(() => broadcast('fs:changed'), 250)
 }
 
 function setWorkspaceRoot(root) {
@@ -145,16 +168,85 @@ function setWorkspaceRoot(root) {
   } catch { watcher = null } // 平台不支持递归监听时静默降级
 }
 
+// ---------- document ownership ----------
+
+// 同一个 Markdown 同一时刻只允许在一个窗口里打开。
+// 每个窗口都是独立的内存副本、各自 0.6s 自动保存，两处同时编辑必然后写覆盖先写，
+// 而且界面上看不出来（文件监听只在「本窗口没脏」时才回读磁盘）。
+// 所以一篇文档被打开前先在这里登记归属，重复打开只把已有的那个窗口抬到前面。
+// 归属随窗口走：一个窗口一次只登记当前这一篇（切文档时旧的自动让出，见 claimDocument）。
+const documentOwners = new Map()
+
+/** 路径 → 占用表的键。Windows 大小写不敏感，同一个文件不能因大小写被开两次 */
+function docKey(p) {
+  const abs = path.resolve(String(p ?? ''))
+  return process.platform === 'win32' ? abs.toLowerCase() : abs
+}
+
+function ownerOf(p) {
+  if (!p) return null
+  const owner = documentOwners.get(docKey(p))
+  return owner && !owner.isDestroyed() ? owner : null
+}
+
+function focusWindow(w) {
+  if (!w || w.isDestroyed()) return
+  if (w.isMinimized()) w.restore()
+  w.focus()
+}
+
+function releaseDocument(w) {
+  for (const [key, held] of [...documentOwners]) {
+    if (held === w) documentOwners.delete(key)
+  }
+}
+
+/**
+ * 把 p 的归属交给窗口 w。已被别的窗口占用时**不转移**：只把那个窗口抬到前面并返回
+ * { ok: false }，w 原有的归属保持不变（先判后清，不会顺手把当前这篇让出去）。
+ * p 传 null 表示这一篇关掉了，w 的归属一并清空。
+ * 返回的 self = 「本来就是你占着」，渲染层据此区分「自己已打开」与「刚认领成功」。
+ */
+function claimDocument(w, p) {
+  const owner = ownerOf(p)
+  if (owner && owner !== w) {
+    focusWindow(owner)
+    return { ok: false, self: false }
+  }
+  releaseDocument(w)
+  if (p) documentOwners.set(docKey(p), w)
+  return { ok: true, self: owner === w }
+}
+
 // ---------- window ----------
 
-function createWindow() {
-  win = new BrowserWindow({
-    width: pendingOpenFile ? WORKSPACE_W : WELCOME_W,
-    height: pendingOpenFile ? WORKSPACE_H : WELCOME_H,
-    minWidth: 460,
-    minHeight: 380,
+/**
+ * 把目标几何夹回它所在显示器的工作区 —— **只挪位置，不改尺寸**。
+ * 换基准尺寸时窗口会一下宽出去几百像素（欢迎页 480 → 工作区 1180），若它原本贴在
+ * 屏幕右侧、或者在小屏 / 分屏 / 接了外接屏的场景里，右边界会整条跑到屏幕外 ——
+ * 「窗口变宽了却看不全」比不加宽更糟，所以每次换尺寸都过一道这个。
+ * 窗口本身比工作区还大时贴到左上角（不缩尺寸：把窗口拖多大是用户自己的选择）。
+ */
+function fitToWorkArea(bounds) {
+  const area = screen.getDisplayMatching(bounds).workArea
+  const clamp = (v, min, size) => Math.round(Math.min(Math.max(v, min), Math.max(min, min + size)))
+  return {
+    ...bounds,
+    x: clamp(bounds.x, area.x, area.width - bounds.width),
+    y: clamp(bounds.y, area.y, area.height - bounds.height),
+  }
+}
+
+/** 编辑器窗口（主窗口 / 独立窗口）共用的创建参数：外观、标题栏、底色。
+    `minWidth` 由调用方按窗口形态给：工作区 600、欢迎页与独立窗口 460。 */
+function editorWindowOptions({ width, height, title, minWidth = WELCOME_MIN_W }) {
+  return {
+    width,
+    height,
+    minWidth,
+    minHeight: WINDOW_MIN_H,
     show: false,
-    title: 'tinymd',
+    title,
     icon: APP_ICON,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#383a3d' : '#f4f4f2',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
@@ -170,30 +262,95 @@ function createWindow() {
       nodeIntegration: false,
       spellcheck: false,
     },
-  })
+  }
+}
+
+/**
+ * 编辑器窗口的收尾：登记到窗口集合、图标与菜单栏策略、缩放复位、开发日志。
+ * 主窗口与独立窗口都要这一套，两者只在创建参数和加载方式上不同。
+ */
+function attachEditorWindow(w, initialFile) {
+  const wcId = w.webContents.id
+  editorWindows.add(w)
+  windowInitialFile.set(wcId, initialFile ?? null)
 
   if (process.platform === 'win32') {
-    win.setIcon(APP_ICON)
-    win.setAutoHideMenuBar(true)
-    win.setMenuBarVisibility(false)
+    w.setIcon(APP_ICON)
+    w.setAutoHideMenuBar(true)
+    w.setMenuBarVisibility(false)
   }
-  win.once('ready-to-show', () => win.show())
+  w.once('ready-to-show', () => w.show())
+  // 菜单是应用级的（全局唯一），聚焦窗口变了就要按它的状态重算导出项可用性
+  w.on('focus', refreshExportMenu)
+  w.on('closed', () => {
+    editorWindows.delete(w)
+    windowInitialFile.delete(wcId)
+    exportEnabled.delete(wcId)
+    // 窗口没了，它占着的文档要放出来，否则那篇从此谁都打不开
+    releaseDocument(w)
+    refreshExportMenu()
+  })
+
+  // Chromium 会把 file:// 页面的缩放级别持久化（误触 Ctrl+滚轮 / Ctrl+= 后重启依旧放大）。
+  // 每次加载页面后强制回到 100%，缩放只作为会话内临时操作（Ctrl+0 可随时复位）。
+  w.webContents.on('did-finish-load', () => {
+    if (!w.isDestroyed() && Math.abs(w.webContents.getZoomFactor() - 1) > 0.001) {
+      w.webContents.zoomFactor = 1
+    }
+  })
+  if (isDev) w.webContents.on('console-message', (_e, _level, message) => console.log('[renderer]', message))
+  return w
+}
+
+function createWindow() {
+  win = attachEditorWindow(new BrowserWindow(editorWindowOptions({
+    width: pendingOpenFile ? WORKSPACE_W : WELCOME_W,
+    height: pendingOpenFile ? WORKSPACE_H : WELCOME_H,
+    minWidth: pendingOpenFile ? WORKSPACE_MIN_W : WELCOME_MIN_W,
+    title: 'tinymd',
+  })), pendingOpenFile)
 
   if (DEV_URL) win.loadURL(DEV_URL)
   else win.loadFile(path.join(__dirname, 'dist/renderer/index.html'))
 
-  if (isDev) win.webContents.on('console-message', (_e, _level, message) => console.log('[renderer]', message))
-
-  // Chromium 会把 file:// 页面的缩放级别持久化（误触 Ctrl+滚轮 / Ctrl+= 后重启依旧放大）。
-  // 每次加载页面后强制回到 100%，缩放只作为会话内临时操作（Ctrl+0 可随时复位）。
-  const resetZoom = () => {
-    if (win && !win.isDestroyed() && Math.abs(win.webContents.getZoomFactor() - 1) > 0.001) {
-      win.webContents.zoomFactor = 1
-    }
-  }
-  win.webContents.on('did-finish-load', resetZoom)
-
   win.on('closed', () => { win = null })
+}
+
+/**
+ * 独立窗口：只编辑一个 Markdown，不带工作空间侧栏。
+ * 与主窗口**共用同一套页面和样式**，差异只有启动参数 `?mode=standalone`
+ * （渲染层据此加 body.standalone），所以不存在第二套 UI 要维护。
+ * 目标文件在这里就登记进 allowedFiles / allowedRoots，窗口一打开就能读它和它的图片。
+ */
+function createStandaloneWindow(file) {
+  const target = allowFile(file)
+  if (!target) return 'invalid'
+
+  // 这篇已经在别的窗口（主窗口或另一个独立窗口）里开着就别开了，
+  // 把那个窗口抬到前面 —— 两处编辑同一篇必然互相覆盖
+  const existing = ownerOf(target)
+  if (existing) { focusWindow(existing); return 'focus' }
+
+  const w = attachEditorWindow(new BrowserWindow(editorWindowOptions({
+    width: WORKSPACE_W,
+    height: WORKSPACE_H,
+    minWidth: WORKSPACE_MIN_W,
+    title: path.basename(target).replace(MD_RE, ''),
+  })), target)
+
+  // 先替它占上：从这里到渲染层认领之间还有几百毫秒（建窗口 + 加载页面 + 读文件），
+  // 中间如果没有归属，另一个窗口能趁这个空隙打开同一篇。
+  // 渲染层启动后会用同一路径再认领一次（归属是它自己，直接通过）。
+  documentOwners.set(docKey(target), w)
+
+  if (DEV_URL) {
+    const url = new URL(DEV_URL)
+    url.searchParams.set('mode', 'standalone')
+    w.loadURL(url.toString())
+  } else {
+    w.loadFile(path.join(__dirname, 'dist/renderer/index.html'), { query: { mode: 'standalone' } })
+  }
+  return 'opened'
 }
 
 function imageStorageDirectory(documentPath, storage) {
@@ -282,8 +439,32 @@ function createImageViewer(parent, src, title) {
 
 // ---------- app menu ----------
 
+// 菜单动作发给**当前聚焦**的编辑器窗口。多窗口下固定发主窗口会让独立窗口里的
+// Ctrl+P / Ctrl+S 作用到错误的文档上。隐藏的打印窗口不聚焦、也不在 editorWindows 里。
 function send(channel, ...args) {
-  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+  const focused = BrowserWindow.getFocusedWindow()
+  const target = focused && editorWindows.has(focused) ? focused : win
+  if (target && !target.isDestroyed()) target.webContents.send(channel, ...args)
+}
+
+/** 广播给所有编辑器窗口（导出用的隐藏打印窗口不在集合内，不会被波及） */
+function broadcast(channel, ...args) {
+  for (const w of editorWindows) {
+    if (!w.isDestroyed()) w.webContents.send(channel, ...args)
+  }
+}
+
+// 导出菜单项是应用级的（菜单全局唯一），可用性只能取「当前聚焦窗口」的判定：
+// 主窗口和独立窗口可能开着不同的文档，不能都往同一个菜单项上写。
+const exportEnabled = new Map() // webContents.id -> 是否可导出
+function refreshExportMenu() {
+  const focused = BrowserWindow.getFocusedWindow()
+  const target = focused && exportEnabled.has(focused.webContents.id) ? focused : win
+  const enabled = !!(target && !target.isDestroyed() && exportEnabled.get(target.webContents.id))
+  for (const id of ['export-pdf', 'export-docx']) {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(id)
+    if (item) item.enabled = enabled
+  }
 }
 
 function buildMenu() {
@@ -306,6 +487,10 @@ function buildMenu() {
         { label: '打开文件夹…', accelerator: 'CmdOrCtrl+O', click: () => send('menu', 'open-folder') },
         { label: '新建文件', accelerator: 'CmdOrCtrl+N', click: () => send('menu', 'new-file') },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('menu', 'save') },
+        // 初始置灰：没有打开文档时导出没有意义。可用性由渲染层经 ui:exportState 同步
+        // （只要打开了文档就可导出，与编辑模式无关 —— 渲染走的是离线渲染，不读编辑器 DOM）
+        { id: 'export-pdf', label: '导出为 PDF…', accelerator: 'CmdOrCtrl+P', enabled: false, click: () => send('menu', 'export-pdf') },
+        { id: 'export-docx', label: '导出为 Word…', accelerator: 'CmdOrCtrl+Shift+P', enabled: false, click: () => send('menu', 'export-docx') },
         { type: 'separator' },
         { label: '插入链接…', accelerator: 'CmdOrCtrl+K', click: () => send('menu', 'link') },
         { label: '关闭工作空间', accelerator: 'CmdOrCtrl+Shift+W', click: () => send('menu', 'close-workspace') },
@@ -351,9 +536,18 @@ function buildMenu() {
 
 // ---------- ipc ----------
 
+/**
+ * 对话框挂到发起请求的那个窗口上。多窗口下不能固定用主窗口 ——
+ * 在独立窗口里点导出，保存对话框却被主窗口盖住会让人以为没反应。
+ */
+function dialogParent(e) {
+  const w = BrowserWindow.fromWebContents(e.sender)
+  return w && !w.isDestroyed() ? w : win
+}
+
 function registerIpc() {
-  ipcMain.handle('dialog:chooseFolder', async () => {
-    const r = await dialog.showOpenDialog(win, {
+  ipcMain.handle('dialog:chooseFolder', async (e) => {
+    const r = await dialog.showOpenDialog(dialogParent(e), {
       title: '选择要打开的文件夹',
       buttonLabel: '打开',
       properties: ['openDirectory', 'createDirectory'],
@@ -361,8 +555,8 @@ function registerIpc() {
     return r.canceled ? null : r.filePaths[0]
   })
 
-  ipcMain.handle('dialog:chooseFile', async () => {
-    const r = await dialog.showOpenDialog(win, {
+  ipcMain.handle('dialog:chooseFile', async (e) => {
+    const r = await dialog.showOpenDialog(dialogParent(e), {
       title: '选择要打开的 Markdown 文件',
       buttonLabel: '打开',
       properties: ['openFile'],
@@ -428,14 +622,14 @@ function registerIpc() {
     return true
   })
 
-  ipcMain.handle('img:chooseDirectory', async (_e, defaultPath) => {
+  ipcMain.handle('img:chooseDirectory', async (e, defaultPath) => {
     const options = {
       title: '选择图片存储目录',
       buttonLabel: '选择',
       properties: ['openDirectory', 'createDirectory'],
     }
     if (defaultPath && path.isAbsolute(defaultPath)) options.defaultPath = defaultPath
-    const r = await dialog.showOpenDialog(win, options)
+    const r = await dialog.showOpenDialog(dialogParent(e), options)
     if (r.canceled || !r.filePaths[0]) return null
     const selected = path.resolve(r.filePaths[0])
     allowedRoots.add(selected)
@@ -471,6 +665,97 @@ function registerIpc() {
     return writeImage(downloadedImageName(mime), data, documentPath, storage)
   })
 
+  // 导出 PDF：在隐藏窗口里重放一份「纯文档」页面再打印。直接对编辑器窗口调用
+  // printToPDF 不行——编辑区是 overflow:auto 的滚动容器，分页会被切坏。
+  //
+  // 串行化：同时发起两次 printToPDF 时 Chromium 会直接报 "Printing failed"。
+  // 保存对话框关掉后打印还要约一秒，这期间窗口已能再次响应（右键再导一次），
+  // 所以用一条队列把真正的打印串起来，后一次等前一次结束再跑。
+  let exportQueue = Promise.resolve()
+  ipcMain.handle('export:pdf', (e, payload) => {
+    const parent = dialogParent(e)
+    const run = exportQueue.then(() => printPdf(payload, parent), () => printPdf(payload, parent))
+    exportQueue = run.then(() => {}, () => {})
+    return run
+  })
+
+  async function printPdf({ html, css, name }, parent) {
+    const r = await dialog.showSaveDialog(parent, {
+      title: '导出为 PDF',
+      defaultPath: `${String(name || 'document')}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    // ⚠️ 保存对话框返回的是 filePath（单数，取消时为 ''），
+    // 不是上面 showOpenDialog 那种 filePaths 数组。
+    if (r.canceled || !r.filePath) return null
+
+    const printer = new BrowserWindow({
+      show: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+    })
+    try {
+      // 从 about:blank 起步：页面里没有任何应用外壳，只有下面注入的文档内容与样式
+      await printer.loadURL('about:blank')
+      await printer.webContents.executeJavaScript(`(() => {
+        document.documentElement.className = 'theme-light'
+        const style = document.createElement('style')
+        style.textContent = ${JSON.stringify(String(css || ''))}
+        document.head.appendChild(style)
+        const root = document.createElement('div')
+        root.className = 'ProseMirror'
+        root.innerHTML = ${JSON.stringify(String(html || ''))}
+        document.body.appendChild(root)
+        return Promise.all([
+          document.fonts.ready,
+          ...[...document.images].map((img) => img.decode().catch(() => {})),
+        ])
+      })()`)
+      const pdf = await printer.webContents.printToPDF({
+        pageSize: 'A4',
+        // 必须开：否则代码块底色、==高亮==、表头底色会被打印样式一并剥离
+        printBackground: true,
+        margins: { top: 0.7, bottom: 0.7, left: 0.71, right: 0.71 }, // 单位英寸
+        displayHeaderFooter: true,
+        headerTemplate: '<div></div>',
+        // 页眉页脚模板不继承页面样式，字号/颜色/字体都得内联写死
+        footerTemplate: '<div style="width:100%;font-size:9px;text-align:center;color:#a5a5ac;font-family:sans-serif">'
+          + '<span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      })
+      await fsp.writeFile(r.filePath, pdf)
+      return r.filePath
+    } finally {
+      if (!printer.isDestroyed()) printer.destroy()
+    }
+  }
+
+  // 导出 Word：渲染层给的是**文档模型**（editor.getJSON()）与目标文档所在目录，
+  // 图片相对路径按那个目录解析 —— 所以导出任意一篇都不需要切换当前文档。
+  // 与 PDF 不同，这里没有隐藏窗口，全程在 Node 里组装，不需要排队。
+  ipcMain.handle('export:docx', async (e, { doc, baseDir, name }) => {
+    const r = await dialog.showSaveDialog(dialogParent(e), {
+      title: '导出为 Word',
+      defaultPath: `${String(name || 'document')}.docx`,
+      filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+    })
+    // 与上面一样：保存对话框返回的是 filePath（单数）
+    if (r.canceled || !r.filePath) return null
+    const { buffer, skippedImages } = await buildDocx(doc, path.resolve(String(baseDir || '')), {
+      title: String(name || 'document'),
+      // 图片必须落在已授权目录内（与 app-file:// 同一套判定）；越界或读不到的按「跳过」计数
+      allowPath: (abs) => [...allowedRoots].some((root) => insideRoot(root, abs)),
+    })
+    await fsp.writeFile(r.filePath, buffer)
+    return { path: r.filePath, skipped: skippedImages }
+  })
+
+  // 导出菜单项的可用性：由渲染层按「是否打开了文档」同步（与编辑模式无关）。
+  // 按窗口分别记录，菜单项上显示的是当前聚焦窗口的判定（见 refreshExportMenu）。
+  ipcMain.handle('ui:exportState', (e, enabled) => {
+    exportEnabled.set(e.sender.id, !!enabled)
+    refreshExportMenu()
+    return true
+  })
+
   ipcMain.handle('ui:openExternal', (_e, url) => {
     if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
     return false
@@ -492,6 +777,32 @@ function registerIpc() {
   ))
   ipcMain.handle('ui:imageViewerData', (e) => imageViewerData.get(e.sender.id) || null)
 
+  // 文件树右键「在新窗口中打开」：独立窗口只编辑这一篇，不带工作空间侧栏。
+  // 返回值让渲染层能把话说准：'opened' 开了新窗口，'focus' 这篇已经在某个窗口里
+  // （已把它抬到前面，没有再开），'invalid' 路径不合法或文件不存在。
+  ipcMain.handle('window:standalone', (_e, p) => createStandaloneWindow(p))
+
+  // 文档归属：渲染层每次切换文档前先认领（claim），被别的窗口占着就原地不动；
+  // 关闭工作空间 / 文档被删时释放（release）；右键菜单先查归属（owner），
+  // 才能把「在新窗口中打开」写成灰显或「前往已打开的窗口」。见文件头的归属表。
+  ipcMain.handle('doc:claim', (e, p) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    if (!w || w.isDestroyed()) return { ok: false, self: false }
+    return claimDocument(w, p ? path.resolve(String(p)) : null)
+  })
+
+  ipcMain.handle('doc:release', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    if (w) releaseDocument(w)
+    return true
+  })
+
+  ipcMain.handle('doc:owner', (e, p) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    const owner = ownerOf(p)
+    return { self: !!owner && owner === w, other: !!owner && owner !== w }
+  })
+
   ipcMain.handle('ui:menu', (e, { items, x, y }) => new Promise((resolve) => {
     const tpl = items.map((it) => it === '-'
       ? { type: 'separator' }
@@ -507,22 +818,39 @@ function registerIpc() {
     })
   }))
 
-  ipcMain.handle('app:initialFile', () => pendingOpenFile)
+  // 启动时要打开的文件是**窗口级**的：独立窗口各自带着自己的目标文档，
+  // 只有主窗口才对应 argv / 双击传入的那一个。
+  ipcMain.handle('app:initialFile', (e) => windowInitialFile.get(e.sender.id) ?? null)
 
-  // 渲染层在进入/退出编辑器时调用，让窗口在两套尺寸间切换
-  ipcMain.handle('ui:resize', (_e, mode) => {
-    if (!win || win.isDestroyed()) return false
-    const w = mode === 'workspace' ? WORKSPACE_W : WELCOME_W
-    const h = mode === 'workspace' ? WORKSPACE_H : WELCOME_H
-    win.setSize(w, h, true)
+  // 渲染层在进入/退出编辑器时调用，让窗口在两套尺寸间切换。
+  // 面板（侧栏 / 目录）的收放**不归这里管**：它们是从编辑区里切空间的，窗口一动不动 ——
+  // 所以这里就是纯粹的「换成哪一套基准尺寸」，没有任何增量要抹平。
+  // ⚠️ 最小宽度也是两套的（工作区 600 / 欢迎页 460），且必须**先松再换** ——
+  // 反过来的话，从工作区退回欢迎页时窗口被 600 卡着，缩不到 480。
+  // ⚠️ 换完尺寸要夹回工作区：两套尺寸差了 500 多 px 宽，贴右站着的窗口会一下跑出屏幕。
+  ipcMain.handle('ui:resize', (e, mode) => {
+    // 只有主窗口在欢迎页 / 工作区两套尺寸之间切换；独立窗口尺寸固定，直接忽略
+    if (!win || win.isDestroyed() || e.sender !== win.webContents) return false
+    const workspace = mode === 'workspace'
+    win.setMinimumSize(workspace ? WORKSPACE_MIN_W : WELCOME_MIN_W, WINDOW_MIN_H)
+    const w = workspace ? WORKSPACE_W : WELCOME_W
+    const h = workspace ? WORKSPACE_H : WELCOME_H
+    const b = win.getBounds()
+    win.setBounds(fitToWorkArea({ x: b.x, y: b.y, width: w, height: h }))
     return true
   })
 
-  ipcMain.handle('ui:theme', (_e, mode) => {
+  ipcMain.handle('ui:theme', (e, mode) => {
     currentThemeMode = mode
     nativeTheme.themeSource = mode === 'neutral' ? 'dark' : 'light'
-    if (process.platform === 'win32' && win && !win.isDestroyed()) {
-      win.setTitleBarOverlay(overlayFor(mode))
+    // 主题是应用级设置：所有窗口的标题栏一起换，并通知**其它**窗口同步界面配色
+    // （只做 DOM 更新、不再回传 setTheme，否则两个窗口会互相触发形成回环）
+    for (const w of editorWindows) {
+      if (w.isDestroyed()) continue
+      if (process.platform === 'win32') {
+        try { w.setTitleBarOverlay(overlayFor(mode)) } catch { /* 窗口类型不支持时忽略 */ }
+      }
+      if (w.webContents.id !== e.sender.id) w.webContents.send('theme:changed', mode)
     }
     return true
   })
@@ -594,11 +922,14 @@ if (!gotLock) {
     createWindow()
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
     nativeTheme.on('updated', () => {
-      if (!win || win.isDestroyed()) return
-      try {
-        win.setBackgroundColor(currentThemeMode === 'neutral' ? '#383a3d' : '#f4f4f2')
-        if (process.platform === 'win32') win.setTitleBarOverlay(overlayFor(currentThemeMode))
-      } catch { /* ignore */ }
+      const bg = currentThemeMode === 'neutral' ? '#383a3d' : '#f4f4f2'
+      for (const w of editorWindows) {
+        if (w.isDestroyed()) continue
+        try {
+          w.setBackgroundColor(bg)
+          if (process.platform === 'win32') w.setTitleBarOverlay(overlayFor(currentThemeMode))
+        } catch { /* ignore */ }
+      }
     })
   })
 

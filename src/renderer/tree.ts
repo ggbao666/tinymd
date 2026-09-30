@@ -2,16 +2,36 @@ import { basename } from './util'
 import type { TreeNode } from './util'
 
 export interface TreeHandlers {
-  onOpenFile(path: string): void
+  /**
+   * 点击某个文件。返回 `false`（或 resolve 成 false）表示**没打开成功** ——
+   * 目前只有一种情况：这一篇正在别的窗口里编辑（同一个文件不允许两处编辑）。
+   * 那时把树上刚点上的高亮退回去，否则树指着的那一篇和编辑器里的并不是同一个。
+   */
+  onOpenFile(path: string): void | boolean | Promise<boolean | void>
   onContext(kind: 'file' | 'dir' | 'root', path: string, x: number, y: number): void
   onRename(oldPath: string, newName: string): void
   /** 重命名输入框关闭但未发起改名（Escape 取消，或名字没改）时回调 */
   onRenameSettled?(oldPath: string, committed: boolean): void
+  /** 点击目录行尾的「+」：在该目录下新建文件 */
+  onNewFile?(dirPath: string): void
 }
 
 const ICONS = {
   chevron: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
   doc: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 1.5H4.2c-.4 0-.7.3-.7.7v11.6c0 .4.3.7.7.7h7.6c.4 0 .7-.3.7-.7V4.5L9.5 1.5Z"/><path d="M9.5 1.5v3h3"/><path d="M6 8h4M6 10.5h4"/></svg>',
+  dots: '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3.2" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="12.8" r="1.5"/></svg>',
+  plus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>',
+}
+
+/** 行尾的小图标按钮（⋮ 更多操作 / + 新建文件）：行 hover 或选中时才浮现 */
+function actionButton(icon: string, title: string, onClick: (e: MouseEvent) => void) {
+  const b = document.createElement('button')
+  b.className = 'tree-act'
+  b.title = title
+  b.tabIndex = -1
+  b.innerHTML = icon
+  b.addEventListener('click', onClick)
+  return b
 }
 
 export function createTree(container: HTMLElement, h: TreeHandlers) {
@@ -123,6 +143,27 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     name.className = 'tree-name'
     name.textContent = n.name
     el.append(name)
+
+    // 行尾操作区：⋮ 打开原来右键菜单的那组动作；目录额外有 + 直接新建文件。
+    // hover / 选中时才浮现（CSS），平时不占视觉。
+    const actions = document.createElement('span')
+    actions.className = 'tree-actions'
+    if (n.type === 'dir') {
+      actions.append(actionButton(ICONS.plus, '新建文件', (e) => {
+        e.stopPropagation()
+        h.onNewFile?.(n.path)
+      }))
+    }
+    actions.append(actionButton(ICONS.dots, '更多操作', (e) => {
+      e.stopPropagation()
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      // 与原右键行为一致：文件先选中再弹菜单（目录不改变选中）
+      if (n.type === 'file') { selectedPath = n.path; render() }
+      h.onContext(n.type, n.path, rect.left, rect.bottom + 4)
+    }))
+    // 点在按钮之间的缝隙上不该被当成「点了这一行」（会开文件 / 折叠目录）
+    actions.addEventListener('click', (e) => e.stopPropagation())
+    el.append(actions)
     return el
   }
 
@@ -140,9 +181,19 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       else expanded.add(path)
       render()
     } else {
+      const previous = selectedPath
       selectedPath = path
       render()
-      h.onOpenFile(path)
+      // 打开是异步的（要先认领编辑权），被拒绝时把高亮退回上一篇
+      const result = h.onOpenFile(path)
+      if (result && typeof (result as Promise<boolean>).then === 'function') {
+        void (result as Promise<boolean>).then((ok) => {
+          if (ok === false && selectedPath === path) { selectedPath = previous; render() }
+        })
+      } else if (result === false) {
+        selectedPath = previous
+        render()
+      }
     }
   })
 
@@ -158,16 +209,9 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
 
   container.addEventListener('contextmenu', (e) => {
     e.preventDefault()
+    // 文件 / 目录的菜单已改由行尾「⋮」按钮触发；右键只保留空白处的根目录菜单
+    // （新建文件 / 新建文件夹 / 在文件夹中打开）。
     const rowEl = (e.target as HTMLElement).closest<HTMLElement>('.tree-row')
-    if (rowEl && !rowEl.querySelector('input')) {
-      const node = find(data, rowEl.dataset.path!)
-      if (node) {
-        selectedPath = node.type === 'file' ? node.path : selectedPath
-        render()
-        h.onContext(node.type, node.path, e.clientX, e.clientY)
-        return
-      }
-    }
     if (!rowEl) h.onContext('root', '', e.clientX, e.clientY)
   })
 

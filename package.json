@@ -1,7 +1,7 @@
 {
   "name": "tinymd",
   "productName": "tinymd",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "tinymd — 一个安静的 Markdown 工作空间",
   "main": "main.js",
   "author": "weiwenjie",
@@ -38,6 +38,7 @@
     "@tiptap/markdown": "^3.31.3",
     "@tiptap/pm": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
+    "docx": "^9.8.1",
     "lowlight": "^3.3.0"
   },
   "devDependencies": {

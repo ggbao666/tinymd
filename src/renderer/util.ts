@@ -120,6 +120,19 @@ export interface Api {
   allowImageDirectory(directory: string): Promise<boolean>
   saveImage(fileName: string, data: Uint8Array, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
   downloadImage(url: string, documentPath: string, storage: ImageStorageSettings): Promise<{ abs: string; displayPath: string }>
+  /** 导出 PDF：把编辑器 HTML 与样式字符串交给主进程在隐藏窗口里打印；返回落盘路径，用户取消为 null */
+  exportPdf(payload: { html: string; css: string; name: string }): Promise<string | null>
+  /**
+   * 导出 Word：把文档模型与**目标文档所在的目录**交给主进程组装 .docx
+   * （相对图片路径按 baseDir 解析）。返回值带上 skipped = 读不到或格式不支持的图片数，
+   * 用户取消保存对话框时为 null。
+   *
+   * doc 用 unknown 而不是 JSONContent：util 是零依赖的工具模块，
+   * 调用方（main.ts）那边本来就有确切类型，没必要为传输边界把 tiptap 引进来。
+   */
+  exportDocx(payload: { doc: unknown; baseDir: string; name: string }): Promise<{ path: string; skipped: number } | null>
+  /** 同步「导出为 PDF…」「导出为 Word…」两个菜单项的可用性 */
+  setExportEnabled(enabled: boolean): Promise<boolean>
   openExternal(url: string): Promise<boolean>
   clipboard(action: 'cut' | 'copy' | 'paste'): Promise<boolean>
   pathForFile(file: File): string
@@ -127,9 +140,28 @@ export interface Api {
   setTheme(mode: 'system' | 'light' | 'neutral' | 'dark' | 'qq' | 'wb-light' | 'wb-dark'): Promise<boolean>
   openImageViewer(src: string, title: string): Promise<boolean>
   imageViewerData(): Promise<{ src: string; title: string } | null>
+  /**
+   * 在独立窗口中打开某个 Markdown：不带工作空间侧栏，只编辑这一篇。
+   * `'focus'` = 这篇已经在一个窗口里开着（同一个文件不允许两处编辑，主进程已把那个窗口抬到前面，
+   * 没有再开新窗口）；`'invalid'` = 路径不合法或文件不存在。
+   */
+  openInNewWindow(p: string): Promise<'opened' | 'focus' | 'invalid'>
+  /**
+   * 认领一篇文档的编辑权。同一个 Markdown 同时只允许一个窗口打开 ——
+   * 两处各自自动保存会互相覆盖，且界面上看不出来。
+   * 被别的窗口占着时返回 `{ ok: false }`（主进程已把那个窗口抬到前面）；
+   * 传 null 表示当前文档已关闭，清空本窗口的认领。
+   */
+  claimDocument(p: string | null): Promise<{ ok: boolean; self: boolean }>
+  /** 释放本窗口认领的文档（关闭工作空间、文档被删除后调用） */
+  releaseDocument(): Promise<boolean>
+  /** 查一篇文档当前的归属（右键菜单据此决定菜单项怎么写） */
+  documentOwner(p: string): Promise<{ self: boolean; other: boolean }>
   initialFile(): Promise<string | null>
   resizeWindow(mode: 'welcome' | 'workspace'): Promise<boolean>
   onFsChanged(cb: () => void): () => void
+  /** 主题是应用级设置，别的窗口改了主题时收到广播（只更新界面，不再回传） */
+  onThemeChanged(cb: (mode: 'neutral' | 'light') => void): () => void
   onMenu(cb: (action: string) => void): () => void
   onOpenFile(cb: (p: string) => void): () => void
 }
