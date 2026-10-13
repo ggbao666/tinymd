@@ -1057,17 +1057,26 @@ body.toc-open #editor-empty { margin-right: 246px; }
   padding: 0.15em 0.4em;
 }
 
-/* ==高亮== 渲染成 <mark>。行内高亮不加圆角：它跟正文同字号、紧贴文字，
-   而下面开了 box-decoration-break: clone（换行时每行各自补内边距），
-   一旦裁圆角就会变成一串独立的小胶囊，很碎。
-   代码块不同 —— 那是编辑器自己画的容器，所以有圆角，见 .ProseMirror pre。 */
+/* ==高亮== 渲染成 <mark>。小圆角（2px）是折中：大圆角配 clone（换行每行各自
+   补内边距）会把跨行高亮碎成一串独立胶囊，2px 时碎片感很轻，单行（绝大多数
+   情况）则与查找命中、行内代码视觉统一。
+   代码块的 8px 不同 —— 那是编辑器自己画的容器，见 .ProseMirror pre。 */
 .ProseMirror mark {
   background: var(--mark-bg);
   color: inherit;
   padding: 0.06em 0.15em;
+  border-radius: 2px;
   /* 跨行时每行都补上左右内边距，否则换行后的那截会贴着文字 */
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+}
+
+/* 高亮不作用于标题（视觉保险）：事务层 StripHeadingHighlight 只在编辑时剥 mark，
+   「文件里预置了标题高亮但还没编辑」的状态靠这里兜底。PDF 的 print.css 同步了一份。 */
+.ProseMirror :is(h1, h2, h3, h4, h5, h6) mark {
+  background: none;
+  color: inherit;
+  padding: 0;
 }
 
 #source-wrap {

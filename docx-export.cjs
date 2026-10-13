@@ -338,6 +338,8 @@ function runForText(text, marks, ctx) {
         opts.shading = { type: ShadingType.CLEAR, fill: COLOR_INLINE_CODE_BG }
         break
       case 'highlight':
+        // 高亮不作用于标题（inHeading 由 heading 分支传入）
+        if (ctx.inHeading) break
         // 用 shading 而不是 Word 的 highlight：highlight 只认十来个固定色名，
         // 而主题给的是具体色值，shading 才能照抄过来
         opts.shading = { type: ShadingType.CLEAR, fill: highlightFill(mark.attrs) }
@@ -535,7 +537,8 @@ function pushBlock(out, node, ctx, level) {
       const depth = Math.min(Math.max(Number(node.attrs?.level) || 1, 1), 6)
       out.push(new Paragraph({
         heading: HEADING_LEVELS[depth - 1],
-        children: runsFor(node.content, ctx),
+        // 高亮不作用于标题：与编辑器 StripHeadingHighlight / print.css 同步
+        children: runsFor(node.content, { ...ctx, inHeading: true }),
       }))
       break
     }

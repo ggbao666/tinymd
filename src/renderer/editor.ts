@@ -149,6 +149,42 @@ const FindHighlight = Extension.create({
 })
 
 /**
+ * ==高亮== 不作用于标题：任何途径（输入规则、粘贴、拖拽）把 highlight mark
+ * 带进标题时，在事务层直接剥掉 —— 编辑、导出（docx 读文档 JSON）语义一致。
+ * 只挂交互编辑器；离线渲染不跑事务，标题保险由 print.css / docx-export 承担。
+ */
+const StripHeadingHighlight = Extension.create({
+  name: 'stripHeadingHighlight',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        appendTransaction: (trs, _old, state) => {
+          if (!trs.some((t) => t.docChanged)) return null
+          const hl = state.schema.marks.highlight
+          if (!hl) return null
+          const tr = state.tr
+          let changed = false
+          state.doc.descendants((node, pos) => {
+            if (!node.isText) return true
+            if (!node.marks.some((m) => m.type === hl)) return true
+            const $pos = state.doc.resolve(pos)
+            for (let d = $pos.depth; d > 0; d--) {
+              if ($pos.node(d).type.name === 'heading') {
+                tr.removeMark(pos, pos + node.nodeSize, hl)
+                changed = true
+                return false
+              }
+            }
+            return true
+          })
+          return changed ? tr : null
+        },
+      }),
+    ]
+  },
+})
+
+/**
  * 代码块起始位置的退格规则：
  * - 非空时吞掉 Backspace，避免代码块与前一段合并或在文档开头被转成段落。
  * - 只有代码块完全为空（只剩唯一空行）时，才退出代码块。
@@ -257,6 +293,7 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       ...contentExtensions(() => currentDir),
       // 交互相关扩展只挂在真编辑器上，离线渲染（导出）不要 —— 否则抢 DOM、带多余装饰
       FindHighlight,
+      StripHeadingHighlight,
       Placeholder.configure({ placeholder: '开始写点什么…' }),
       BubbleMenu.configure({
         element: bubbleEl,
