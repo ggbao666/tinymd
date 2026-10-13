@@ -135,6 +135,22 @@ async function uniquePath(parent, base, ext, suffixSeparator = ' ') {
   }
 }
 
+// 原子写入用的临时文件名：**同目录**（rename 不能跨文件系统）、带 pid 与自增计数，
+// 连续两次保存不会互相踩。后缀不是 .md，文件树的 MD_RE 过滤不会把它列出来。
+let tmpCounter = 0
+function tmpPathFor(abs) {
+  return `${abs}.tmp-${process.pid}-${Date.now().toString(36)}-${(tmpCounter++).toString(36)}`
+}
+
+// 主进程里没有界面可用的错误出口：把原因写进 userData，下次启动时由渲染层
+// 经 app:takeSaveError 取走提示（退出前的兜底保存失败时用，见 fs:flush）
+function saveErrorFile() {
+  return path.join(app.getPath('userData'), 'last-save-error.txt')
+}
+function noteSaveError(message) {
+  try { fs.writeFileSync(saveErrorFile(), String(message).slice(0, 500)) } catch { /* 连错误都记不下就算了 */ }
+}
+
 async function listTree(dir, depth) {
   let entries
   try { entries = await fsp.readdir(dir, { withFileTypes: true }) } catch { return [] }
@@ -177,10 +193,12 @@ function setWorkspaceRoot(root) {
 // 归属随窗口走：一个窗口一次只登记当前这一篇（切文档时旧的自动让出，见 claimDocument）。
 const documentOwners = new Map()
 
-/** 路径 → 占用表的键。Windows 大小写不敏感，同一个文件不能因大小写被开两次 */
+/** 路径 → 占用表的键。大小写不敏感的文件系统（Windows、macOS 默认）上必须统一大小写：
+    否则 /docs/a.md 与 /docs/A.md 会被当成两篇文档，各开一个窗口各自自动保存互相覆盖（A6） */
 function docKey(p) {
   const abs = path.resolve(String(p ?? ''))
-  return process.platform === 'win32' ? abs.toLowerCase() : abs
+  const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin'
+  return caseInsensitive ? abs.toLowerCase() : abs
 }
 
 function ownerOf(p) {
@@ -576,15 +594,44 @@ function registerIpc() {
     return (await fsp.readFile(p, 'utf8')).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
   })
 
+  // 文件状态（mtime / size）：渲染层用它判断「磁盘上的文件是不是被别的程序改过了」
+  ipcMain.handle('fs:stat', async (_e, p) => {
+    try {
+      const abs = assertReadable(p)
+      const st = await fsp.stat(abs)
+      return { mtimeMs: st.mtimeMs, size: st.size }
+    } catch { return null }
+  })
+
   ipcMain.handle('fs:write', async (_e, p, content) => {
-    assertInside(p)
-    await fsp.mkdir(path.dirname(p), { recursive: true })
-    await fsp.writeFile(p, content, 'utf8')
+    const abs = assertInside(p)
+    await fsp.mkdir(path.dirname(abs), { recursive: true })
+    // 原子替换：先写同目录的临时文件再 rename。直接 writeFile 是先截断再写，
+    // 0.6s 一次的自动保存一旦赶上崩溃 / 断电 / 磁盘满，原文件会变成半截（A3）。
+    // rename 在同一文件系统内是原子操作，读者只会看到旧内容或新内容，不存在中间态。
+    const tmp = tmpPathFor(abs)
+    try {
+      await fsp.writeFile(tmp, content, 'utf8')
+      await fsp.rename(tmp, abs)
+    } catch (error) {
+      try { await fsp.unlink(tmp) } catch { /* 临时文件可能还没写出来 */ }
+      throw error
+    }
     return true
   })
 
   ipcMain.on('fs:flush', (e, { p, content }) => {
-    try { assertInside(p); fs.writeFileSync(p, content, 'utf8') } catch { /* 退出前尽力而为 */ }
+    // 退出前的兜底保存，与 fs:write 同样的原子写法。这里失败时页面正在卸载、
+    // 没有任何界面能显示错误，把原因写进 userData，下次启动经 app:takeSaveError 提示（A3/A7）
+    try {
+      const abs = assertInside(p)
+      fs.mkdirSync(path.dirname(abs), { recursive: true })
+      const tmp = tmpPathFor(abs)
+      fs.writeFileSync(tmp, content, 'utf8')
+      fs.renameSync(tmp, abs)
+    } catch (error) {
+      noteSaveError(`上次退出时有一次保存失败：${error instanceof Error ? error.message : String(error)}`)
+    }
     e.returnValue = true
   })
 
@@ -651,7 +698,16 @@ function registerIpc() {
   ipcMain.handle('img:download', async (_e, url, documentPath, storage) => {
     if (!/^https?:\/\//i.test(String(url))) throw new Error('只支持下载 HTTP(S) 图片')
     assertInside(documentPath)
-    const response = await net.fetch(String(url), { redirect: 'follow' })
+    // net.fetch 自己没有超时：挂起的请求会让「已本地化图片」的提示一直不出现，
+    // 用户以为程序卡了（docx-export.cjs 的 fetchRemote 有 15s，这里对齐，B7）
+    const DOWNLOAD_TIMEOUT_MS = 15000
+    let timeoutTimer = 0
+    const response = await Promise.race([
+      net.fetch(String(url), { redirect: 'follow' }),
+      new Promise((_resolve, reject) => {
+        timeoutTimer = setTimeout(() => reject(new Error('图片下载超时（15 秒）')), DOWNLOAD_TIMEOUT_MS)
+      }),
+    ]).finally(() => clearTimeout(timeoutTimer))
     if (!response.ok) throw new Error(`图片下载失败 (${response.status})`)
     const mime = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
     if (!mime.startsWith('image/')) throw new Error('网络地址返回的不是图片')
@@ -803,6 +859,29 @@ function registerIpc() {
     return { self: !!owner && owner === w, other: !!owner && owner !== w }
   })
 
+  // 重命名 / 删除前的占用查询，**含子孙路径**：改一个目录的名、或把目录移到废纸篓时，
+  // 里面的文件可能正在别的窗口里编辑。那个窗口的 state.openPath 还是旧路径，0.6s 后
+  // 自动保存把新内容写回旧路径（fs:write 自带 mkdir -p，连目录一起重建）——
+  // 「删掉的文件又出现了」「改名后同一篇文档的两份编辑分裂成两个文件」就是这么来的（A1）。
+  // doc:owner 只查单篇，这里回答的是「p 自己或它的子孙里有没有别人的文档」。
+  ipcMain.handle('doc:ownerPrefix', (e, p) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    const raw = String(p ?? '')
+    if (!raw) return { self: false, other: false }
+    const key = docKey(raw)
+    const prefix = key + path.sep
+    let self = false
+    let other = false
+    for (const [heldKey, held] of documentOwners) {
+      if (held.isDestroyed()) continue
+      if (heldKey !== key && !heldKey.startsWith(prefix)) continue
+      if (held === w) self = true
+      else other = true
+      if (self && other) break
+    }
+    return { self, other }
+  })
+
   ipcMain.handle('ui:menu', (e, { items, x, y }) => new Promise((resolve) => {
     const tpl = items.map((it) => it === '-'
       ? { type: 'separator' }
@@ -821,6 +900,15 @@ function registerIpc() {
   // 启动时要打开的文件是**窗口级**的：独立窗口各自带着自己的目标文档，
   // 只有主窗口才对应 argv / 双击传入的那一个。
   ipcMain.handle('app:initialFile', (e) => windowInitialFile.get(e.sender.id) ?? null)
+
+  // 上次退出前的兜底保存失败原因（见 fs:flush 的 noteSaveError）：取走即清空
+  ipcMain.handle('app:takeSaveError', () => {
+    try {
+      const text = fs.readFileSync(saveErrorFile(), 'utf8')
+      fs.unlinkSync(saveErrorFile())
+      return text
+    } catch { return null }
+  })
 
   // 渲染层在进入/退出编辑器时调用，让窗口在两套尺寸间切换。
   // 面板（侧栏 / 目录）的收放**不归这里管**：它们是从编辑区里切空间的，窗口一动不动 ——

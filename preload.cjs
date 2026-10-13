@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   allowFile: (p) => ipcRenderer.invoke('workspace:allowFile', p),
   tree: (root) => ipcRenderer.invoke('fs:tree', root),
   read: (p) => ipcRenderer.invoke('fs:read', p),
+  stat: (p) => ipcRenderer.invoke('fs:stat', p),
   write: (p, content) => ipcRenderer.invoke('fs:write', p, content),
   flush: (p, content) => ipcRenderer.sendSync('fs:flush', { p, content }),
   create: (parent, base, type) => ipcRenderer.invoke('fs:create', parent, base, type),
@@ -42,8 +43,10 @@ contextBridge.exposeInMainWorld('api', {
   claimDocument: (p) => ipcRenderer.invoke('doc:claim', p),
   releaseDocument: () => ipcRenderer.invoke('doc:release'),
   documentOwner: (p) => ipcRenderer.invoke('doc:owner', p),
+  ownerPrefix: (p) => ipcRenderer.invoke('doc:ownerPrefix', p),
 
   initialFile: () => ipcRenderer.invoke('app:initialFile'),
+  takeSaveError: () => ipcRenderer.invoke('app:takeSaveError'),
   resizeWindow: (mode) => ipcRenderer.invoke('ui:resize', mode),
 
   onFsChanged: (cb) => on('fs:changed', cb),

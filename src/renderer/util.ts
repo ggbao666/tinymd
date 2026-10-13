@@ -108,6 +108,8 @@ export interface Api {
   allowFile(p: string): Promise<boolean>
   tree(root: string): Promise<TreeNode[]>
   read(p: string): Promise<string>
+  /** 文件状态（mtime / size）：用来发现「磁盘上的文件被别的程序改过了」 */
+  stat(p: string): Promise<{ mtimeMs: number; size: number } | null>
   write(p: string, content: string): Promise<boolean>
   flush(p: string, content: string): boolean
   create(parent: string, base: string, type: 'file' | 'dir'): Promise<string>
@@ -157,7 +159,14 @@ export interface Api {
   releaseDocument(): Promise<boolean>
   /** 查一篇文档当前的归属（右键菜单据此决定菜单项怎么写） */
   documentOwner(p: string): Promise<{ self: boolean; other: boolean }>
+  /**
+   * 查 p 自己或其子孙路径里有没有被占用的文档（重命名 / 删除**目录**前用）。
+   * 目录里的文件正在别的窗口开着时，那个窗口的自动保存会把旧路径连目录一起写回来。
+   */
+  ownerPrefix(p: string): Promise<{ self: boolean; other: boolean }>
   initialFile(): Promise<string | null>
+  /** 取走上一次退出时保存失败的原因（没有则为 null） */
+  takeSaveError(): Promise<string | null>
   resizeWindow(mode: 'welcome' | 'workspace'): Promise<boolean>
   onFsChanged(cb: () => void): () => void
   /** 主题是应用级设置，别的窗口改了主题时收到广播（只更新界面，不再回传） */

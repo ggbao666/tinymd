@@ -42,6 +42,12 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
   let renameDraft: string | null = null
   /** 重命名进行中收到的树数据：先挂起，等改名结束再应用，避免输入框被重建冲掉 */
   let pendingData: TreeNode[] | null = null
+  /**
+   * 键盘焦点所在行（C4）：render() 之后按它恢复焦点 —— Enter 折叠目录、F2 重命名
+   * 都会重建 DOM，不恢复的话键盘焦点就丢了。鼠标点行也会记一份，这样点击之后
+   * 再来一次树刷新（fs:changed），焦点仍然留在用户刚操作的那一行上。
+   */
+  let focusPath: string | null = null
   const expanded = new Set<string>()
 
   function setData(nodes: TreeNode[]) {
@@ -58,7 +64,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
   }
   function select(path: string) { selectedPath = path; if (!renamePath) render() }
   function ensureExpanded(path: string) { if (!expanded.has(path)) { expanded.add(path); if (!renamePath) render() } }
-  function clear() { data = []; pendingData = null; selectedPath = ''; renamePath = null; renameDraft = null; expanded.clear(); render() }
+  function clear() { data = []; pendingData = null; selectedPath = ''; renamePath = null; renameDraft = null; focusPath = null; expanded.clear(); render() }
 
   /** 让指定行进入重命名态（文件/文件夹均可），输入框聚焦并全选 */
   function startRename(path: string) {
@@ -70,7 +76,51 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     render()
   }
 
+  /**
+   * 在树里定位某一行（面包屑的文件夹部分点击用，C8）：展开它的所有祖先目录、
+   * 选中并滚动到可见处。路径不在树里（被删了 / 还没刷新）时返回 false。
+   */
+  function reveal(path: string): boolean {
+    // 自底向上收集「从根到目标」整条链上的目录，找到才算数
+    const chain: string[] = []
+    const walk = (nodes: TreeNode[]): boolean => {
+      for (const n of nodes) {
+        if (n.path === path) return true
+        if (n.children?.length && walk(n.children)) { chain.push(n.path); return true }
+      }
+      return false
+    }
+    if (!walk(data)) return false
+    for (const dir of chain) expanded.add(dir)
+    selectedPath = path
+    render()
+    const row = [...container.querySelectorAll<HTMLElement>('.tree-row')].find((el) => el.dataset.path === path)
+    row?.scrollIntoView({ block: 'nearest' })
+    return true
+  }
+
+  /**
+   * 路径改名之后，把内部「按路径记的状态」整棵树搬过去（A1/A2 的配套）：
+   * 展开态、选中行、键盘焦点。不搬的话：改一个展开着的目录名，它自己折起来；
+   * 改一个选中文件的名字，高亮消失；目录里的子孙路径同样要跟着换前缀。
+   */
+  function renameKeys(oldPath: string, newPath: string) {
+    const sep = oldPath.includes('\\') ? '\\' : '/'
+    const head = oldPath + sep
+    const remap = (p: string) =>
+      p === oldPath ? newPath : p.startsWith(head) ? newPath + p.slice(oldPath.length) : p
+    const moved = new Set<string>()
+    for (const dir of expanded) moved.add(remap(dir))
+    expanded.clear()
+    for (const dir of moved) expanded.add(dir)
+    selectedPath = remap(selectedPath)
+    focusPath = focusPath === null ? null : remap(focusPath)
+    render()
+  }
+
   function render() {
+    // 重建 DOM 会丢焦点：之前还攥着焦点的话，重建之后按 focusPath 还回去
+    const hadFocus = container.contains(document.activeElement)
     container.innerHTML = ''
     const frag = document.createDocumentFragment()
     const walk = (nodes: TreeNode[], depth: number) => {
@@ -86,6 +136,10 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       empty.className = 'tree-empty'
       empty.textContent = '空文件夹'
       container.append(empty)
+    }
+    if (hadFocus && focusPath) {
+      const back = [...container.querySelectorAll<HTMLElement>('.tree-row')].find((el) => el.dataset.path === focusPath)
+      back?.focus()
     }
   }
 
@@ -134,6 +188,10 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       return el
     }
 
+    // 行是可聚焦的（C4）：Tab 能走到，方向键在行间移动。重命名行不含它 ——
+    // 那一行的焦点归输入框，Tab 从输入框直接去下一行。
+    el.tabIndex = 0
+
     const icon = document.createElement('span')
     icon.className = 'tree-icon' + (n.type === 'dir' && expanded.has(n.path) ? ' open' : '')
     icon.innerHTML = n.type === 'dir' ? ICONS.chevron : ICONS.doc
@@ -176,6 +234,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     const path = rowEl.dataset.path!
     const node = find(data, path)
     if (!node) return
+    focusPath = path
     if (node.type === 'dir') {
       if (expanded.has(path)) expanded.delete(path)
       else expanded.add(path)
@@ -203,7 +262,43 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     const node = find(data, rowEl.dataset.path!)
     if (node?.type === 'file') {
       e.preventDefault()
+      focusPath = node.path
       startRename(node.path)
+    }
+  })
+
+  // 键盘导航（C4）：↑/↓ 移动焦点、Enter 打开文件 / 折叠目录、F2 重命名。
+  // 与资源管理器的行为一致。Tab / Shift+Tab 的往返不用管 —— 行是可聚焦元素，
+  // 浏览器自己会走。重命名输入框里的按键已被输入框自己的监听 stopPropagation 挡下。
+  container.addEventListener('keydown', (e) => {
+    const rowEl = (e.target as HTMLElement).closest<HTMLElement>('.tree-row')
+    if (!rowEl) return
+    const path = rowEl.dataset.path!
+    const node = find(data, path)
+    if (!node) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const rows = [...container.querySelectorAll<HTMLElement>('.tree-row')]
+      const next = rows[rows.indexOf(rowEl) + (e.key === 'ArrowDown' ? 1 : -1)]
+      if (next) { focusPath = next.dataset.path!; next.focus() }
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      focusPath = path
+      if (node.type === 'dir') {
+        if (expanded.has(path)) expanded.delete(path)
+        else expanded.add(path)
+        render()
+      } else {
+        h.onOpenFile(path)
+      }
+      return
+    }
+    if (e.key === 'F2') {
+      e.preventDefault()
+      focusPath = path
+      startRename(path)
     }
   })
 
@@ -228,7 +323,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
 
   render()
   return {
-    setData, select, ensureExpanded, clear, startRename,
+    setData, select, ensureExpanded, clear, startRename, reveal, renameKeys,
     get selected() { return selectedPath },
     get renaming() { return renamePath !== null },
   }

@@ -462,6 +462,8 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
       editor.commands.setContent(normalizeMarkdownImagePaths(markdown), { contentType: 'markdown', emitUpdate: false })
       editor.view.dom.scrollTop = 0
     },
+    /** 只更新图片的相对解析基准目录（文档的父目录被重命名时用，不重开文档、不动撤销栈） */
+    setDir(fileDir: string) { currentDir = fileDir },
     getMarkdown(): string {
       return (editor.storage.markdown as { manager: { serialize(doc: unknown): string } }).manager.serialize(editor.state.doc.toJSON())
     },

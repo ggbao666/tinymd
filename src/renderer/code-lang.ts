@@ -1,22 +1,50 @@
 import type { Editor } from '@tiptap/core'
 import type { Node as PMNode } from '@tiptap/pm/model'
 
-/** 菜单项：[显示名, 语言值]，空串表示「纯文本」（清除语言，不做高亮） */
+/**
+ * 菜单项：[显示名, 语言值]，空串表示「纯文本」（清除语言，不做高亮）。
+ * ⚠️ 语言值必须都在 lowlight 的 common 子集里（见 editor.ts 的 createLowlight(common)）——
+ * 没注册的语言高亮不了，菜单里列出来只会让人以为点坏了。曾漏过 HTML（common 里只有 xml），
+ * 那次选完没有任何反应。要加语言先确认 common 里有对应键。
+ * 顺序按常用程度排，不按字母序 —— 这是个给人点的菜单，不是给机器扫的清单（C10）。
+ */
 const LANGS: [string, string][] = [
   ['纯文本', ''],
   ['JavaScript', 'javascript'],
   ['TypeScript', 'typescript'],
   ['Python', 'python'],
-  ['Bash / Shell', 'bash'],
-  ['JSON', 'json'],
-  ['HTML', 'html'],
-  ['CSS', 'css'],
-  ['Markdown', 'markdown'],
-  ['SQL', 'sql'],
-  ['YAML', 'yaml'],
+  ['Java', 'java'],
+  ['C', 'c'],
+  ['C++', 'cpp'],
+  ['C#', 'csharp'],
   ['Go', 'go'],
   ['Rust', 'rust'],
-  ['Java', 'java'],
+  ['Ruby', 'ruby'],
+  ['PHP', 'php'],
+  ['Swift', 'swift'],
+  ['Kotlin', 'kotlin'],
+  ['Objective-C', 'objectivec'],
+  ['Bash / Shell', 'bash'],
+  ['SQL', 'sql'],
+  ['JSON', 'json'],
+  ['YAML', 'yaml'],
+  ['XML / HTML', 'xml'],
+  ['CSS', 'css'],
+  ['SCSS', 'scss'],
+  ['Less', 'less'],
+  ['Markdown', 'markdown'],
+  ['Diff', 'diff'],
+  ['GraphQL', 'graphql'],
+  ['Lua', 'lua'],
+  ['Perl', 'perl'],
+  ['R', 'r'],
+  ['Makefile', 'makefile'],
+  ['INI', 'ini'],
+  ['WebAssembly', 'wasm'],
+  ['Arduino', 'arduino'],
+  ['VB.NET', 'vbnet'],
+  ['PHP 模板', 'php-template'],
+  ['Python REPL', 'python-repl'],
 ]
 
 export interface CodeLangMenu {

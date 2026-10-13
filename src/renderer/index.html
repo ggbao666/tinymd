@@ -96,7 +96,8 @@
           <div id="editor-empty" class="hidden">
             <div class="empty-inner">
               <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M28 6H12a3 3 0 0 0-3 3v30a3 3 0 0 0 3 3h24a3 3 0 0 0 3-3V17L28 6Z"/><path d="M28 6v11h11"/><path d="M17 24h14M17 31h14"/></svg>
-              <p>从左侧选择一个 Markdown 文件，或新建一个</p>
+              <!-- 侧栏可能被用户收起（no-sidebar），那时左边并没有东西 —— 别说「从左侧」（C7） -->
+              <p>选择一个 Markdown 文件，或新建一个</p>
               <button id="btn-new-file" class="btn-primary small">新建文件</button>
             </div>
           </div>

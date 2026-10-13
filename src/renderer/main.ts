@@ -218,6 +218,18 @@ function resolveInside(fromFile: string, rel: string): string | null {
   return abs.startsWith(boundary + '/') ? abs : null
 }
 
+/**
+ * openPath 是否就是 target、或位于 target 里面。
+ * ⚠️ 两边都要把斜杠归一成 /：doDelete 早先只替换了 target 一侧，Windows 上
+ * `C:\ws\docs\a.md`.startsWith('C:/ws/docs/') 永远为 false —— 祖先分支形同虚设，
+ * 只有精确匹配那一半在干活（删父目录时编辑器不退回空状态）。
+ */
+function isPathOrInside(openPath: string, target: string): boolean {
+  const a = openPath.replace(/\\/g, '/')
+  const b = target.replace(/\\/g, '/')
+  return a === b || a.startsWith(b + '/')
+}
+
 // ---------- tree ----------
 
 const treeCtl = createTree(els.tree, {
@@ -249,18 +261,18 @@ let persistentStatus = ''   // 保存状态：左侧常驻显示，不自动消�
 
 // 欢迎页没有状态栏，同样的提示用页面内的浮条兜底，避免拖入不支持的文件时毫无反馈
 let welcomeToastTimer: number | undefined
-function flashWelcomeToast(text: string, isError = false) {
+function flashWelcomeToast(text: string, isError = false, duration = 2600) {
   if (els.welcome.classList.contains('hidden')) return
   els.welcomeToast.textContent = text
   els.welcomeToast.classList.toggle('error', isError)
   els.welcomeToast.classList.remove('hidden')
   clearTimeout(welcomeToastTimer)
-  welcomeToastTimer = window.setTimeout(() => els.welcomeToast.classList.add('hidden'), 2600)
+  welcomeToastTimer = window.setTimeout(() => els.welcomeToast.classList.add('hidden'), duration)
 }
 
-function setStatus(text: string, isError = false) {
+function setStatus(text: string, isError = false, duration = 2400) {
   // 保存状态（已保存 / 编辑中…）常驻在左侧；其余为临时提示，2.4s 后回落到保存状态
-  if (text === '已保存' || text === '编辑中…') {
+  if (text === '已保存' || text === '编辑中…' || text.startsWith('已保存')) {
     persistentStatus = text
     clearTimeout(statusTimer)
     els.statusPill.classList.remove('hidden')
@@ -268,7 +280,7 @@ function setStatus(text: string, isError = false) {
     els.status.classList.remove('error')
     return
   }
-  flashWelcomeToast(text, isError)
+  flashWelcomeToast(text, isError, duration)
   els.statusPill.classList.remove('hidden')
   els.status.textContent = text
   els.status.classList.toggle('error', isError)
@@ -276,10 +288,22 @@ function setStatus(text: string, isError = false) {
   statusTimer = window.setTimeout(() => {
     els.status.textContent = persistentStatus
     els.status.classList.toggle('error', false)
-  }, 2400)
+  }, duration)
 }
 
 // ---------- save ----------
+
+/** 保存前发现过「磁盘上的文件被别的程序改过」（A4）：保存时如实交代一句 */
+let externalChange = false
+/**
+ * 上一次保存 / 打开时记下的磁盘 mtime。fs:changed 里拿它和磁盘比对，把「自己刚写的」
+ * 与「别人改的」区分开。取不到 mtime 时置 Infinity：宁可漏报，也别把自己刚保存的
+ * 内容误报成别人的修改（fs:write 成功后 stat 失败是唯一入口）。
+ */
+let lastSavedMtime = 0
+function noteDiskState(st: { mtimeMs: number } | null) {
+  lastSavedMtime = st ? st.mtimeMs : Number.POSITIVE_INFINITY
+}
 
 function currentDocumentText(): string {
   return editorMode === 'source' ? els.sourceEditor.value : editorCtl.getMarkdown()
@@ -299,7 +323,10 @@ async function doSave() {
     await window.api.write(state.openPath, md)
     lastSaved = md
     state.dirty = false
-    setStatus('已保存')
+    // 保存后记下新的 mtime：自己刚写的这次不会触发「外部修改」误报
+    noteDiskState(await window.api.stat(state.openPath))
+    setStatus(externalChange ? '已保存（覆盖了磁盘上的外部修改）' : '已保存')
+    externalChange = false
     updateBreadcrumb()
   } catch (e) {
     setStatus('保存失败：' + (e as Error).message, true)
@@ -321,19 +348,40 @@ window.addEventListener('beforeunload', () => {
  * 打开一篇文档。**这是「一个文件只在一个窗口里编辑」的唯一关口** ——
  * 无论从文件树、最近打开、拖拽、双击、命令行还是相对链接进来，最后都走这里。
  * 返回是否真的打开了（被别的窗口占着时为 false，调用方据此决定要不要清空当前视图）。
+ *
+ * ⚠️ openSeq：函数里有三个 await（flushSave / claimDocument / read）。快速连点两个文件时，
+ * 先发起的调用可能在「认领了 A、还没读」时被后一次超越 —— 不拦的话归属表记着 A（其实没开
+ * A），B 打开着却无人认领，别的窗口就能再开 B，正是归属表要防的那件事（A5）。每个 await
+ * 之后核对序号，号变了就中止，并把认领目标交还给最新那一篇（claimDocument 在主进程里是
+ * 「先释放再登记」的原子操作，不存在半路松手的瞬间）。
  */
+let openSeq = 0
+let openTarget = ''
 async function openFile(path: string): Promise<boolean> {
   if (path === state.openPath) return true
+  const seq = ++openSeq
+  openTarget = path
   await flushSave()
+  if (seq !== openSeq) return false
   // 先认领编辑权：被别的窗口占着就原地不动（主进程会把那个窗口抬到前面）。
   // 两处各自 0.6s 自动保存同一篇，必然后写覆盖先写，而且界面上完全看不出来。
   const claim = await window.api.claimDocument(path)
+  if (seq !== openSeq) {
+    // 被后一次请求超越：把认领交还给最新目标。同一篇的重复请求会再次认领到自己，
+    // 那时不能还，否则那篇会变成无人认领
+    if (openTarget !== path) void window.api.claimDocument(openTarget)
+    return false
+  }
   if (!claim.ok) {
     setStatus(`「${basename(path)}」已在另一个窗口中打开`, true)
     return false
   }
   try {
     const md = await window.api.read(path)
+    if (seq !== openSeq) {
+      if (openTarget !== path) void window.api.claimDocument(openTarget)
+      return false
+    }
     editorCtl.open(md, dirname(path))
     els.sourceEditor.value = md
     // 文本模式只作用于当前查看；切换到任意文档时恢复所见即所得。
@@ -341,17 +389,18 @@ async function openFile(path: string): Promise<boolean> {
     state.openPath = path
     lastSaved = md
     state.dirty = false
+    externalChange = false
     treeCtl.select(path)
     showEditor()
     updateBreadcrumb()
     updateCount()
-    // 独立窗口的标题是「文档 — tinymd」：它不属于任何工作空间，没有目录名可挂
-    const dr = displayRoot()
-    document.title = STANDALONE
-      ? `${basename(path)} — tinymd`
-      : dr ? `${basename(path)} — ${basename(dr)}` : basename(path)
     els.editorWrap.scrollTop = 0
     els.sourceEditor.scrollTop = 0
+    // 记下打开时的磁盘 mtime：之后 fs:changed 拿它和磁盘比对，区分「自己刚写的」
+    // 与「别人改的」（A4）
+    void window.api.stat(path).then((st) => {
+      if (st && state.openPath === path) lastSavedMtime = st.mtimeMs
+    })
     void localizeRemoteImages(editorCtl.remoteImageSources())
     return true
   } catch (e) {
@@ -377,7 +426,6 @@ async function openWorkspace(root: string, selectFile?: string) {
   els.workspace.classList.remove('hidden')
   if (!STANDALONE) void window.api.resizeWindow('workspace')
   addRecent(root)
-  document.title = basename(root)
   // 打开不了（比如那一篇正在别的窗口里）就退回空文档，而不是继续显示上一个工作空间的文档
   if (selectFile) { if (!await openFile(selectFile)) showEditorEmpty() }
   else showEditorEmpty()
@@ -431,7 +479,8 @@ async function closeWorkspace() {
   els.workspace.classList.add('hidden')
   els.welcome.classList.remove('hidden')
   if (!STANDALONE) void window.api.resizeWindow('welcome')
-  document.title = 'tinymd'
+  // 面包屑与标题一起清掉（updateBreadcrumb 顺带驱动 updateTitle）
+  updateBreadcrumb()
   renderRecents()
   syncExportAvailability()
 }
@@ -441,7 +490,7 @@ function showEditor() {
   els.editorWrap.classList.toggle('hidden', editorMode !== 'visual')
   els.sourceWrap.classList.toggle('hidden', editorMode !== 'source')
   updateEditorModeButton()
-  syncTocButton()
+  // refreshToc 内部会先过一遍 syncTocButton（按钮可用性跟着大纲走）
   refreshToc()
   syncExportAvailability()
 }
@@ -462,8 +511,8 @@ function showEditorEmpty() {
   els.editorEmpty.classList.remove('hidden')
   syncTocButton()
   refreshToc()
+  // 面包屑与标题一并清空（updateBreadcrumb 顺带驱动 updateTitle）
   updateBreadcrumb()
-  document.title = STANDALONE ? 'tinymd' : basename(displayRoot())
   syncExportAvailability()
 }
 
@@ -473,7 +522,22 @@ function displayRoot(): string {
   return state.root || (state.openPath ? dirname(state.openPath) : '')
 }
 
+/**
+ * 窗口标题（C12）：`*文件名 — 文件夹`，* 表示有未保存修改。
+ * 虽然 0.6s 就自动保存了，但 Alt-Tab / 任务栏里一眼能看出当前文档还没落盘。
+ * 所有 document.title 赋值都收在这里，由 updateBreadcrumb 统一驱动 ——
+ * 它是唯一跟着「当前文档 + 脏状态」一起跑的地方（每次 onChange 都会调）。
+ */
+function updateTitle() {
+  const file = state.openPath ? basename(state.openPath) : ''
+  const root = displayRoot() ? basename(displayRoot()) : ''
+  const dirty = state.dirty ? '*' : ''
+  if (STANDALONE) document.title = file ? `${dirty}${file} — tinymd` : 'tinymd'
+  else document.title = file ? `${dirty}${file} — ${root}` : (root || 'tinymd')
+}
+
 function updateBreadcrumb() {
+  updateTitle()
   const root = displayRoot() ? basename(displayRoot()) : ''
   const file = state.openPath ? basename(state.openPath) : ''
   els.breadcrumb.innerHTML = ''
@@ -481,6 +545,17 @@ function updateBreadcrumb() {
     const f = document.createElement('span')
     f.className = 'crumb-folder'
     f.textContent = root
+    // 文件夹部分可点：在文件树里定位当前文档（C8）。
+    // 单文件模式 / 独立窗口没有树，点了没意义，不给交互。
+    if (state.root && state.openPath) {
+      f.classList.add('clickable')
+      f.title = '在文件树中定位'
+      f.addEventListener('click', () => {
+        // 侧栏被用户收着时先展开，不然定位了也看不见
+        if (document.body.classList.contains('no-sidebar')) toggleSidebar()
+        treeCtl.reveal(state.openPath!)
+      })
+    }
     els.breadcrumb.append(f)
   }
   if (file) {
@@ -594,6 +669,8 @@ function outlineRows(items: { level: number; text: string; pos: number }[], onPi
 
 /** 换了文档 / 改了内容后同步目录内容（关着就不用管，展开时会渲染） */
 function refreshToc() {
+  // 标题可能刚被删光 / 新加上：按钮可用性跟着大纲走（B4）
+  syncTocButton()
   if (tocOpen) renderToc()
 }
 
@@ -708,7 +785,38 @@ let tocOpen = false
 
 function renderToc() {
   els.tocList.replaceChildren(outlineRows(outlineItems(), (pos) => editorCtl.revealPos(pos)))
+  syncTocHighlight()
 }
+
+/**
+ * 正文滚动时高亮当前所在标题（C9）：取编辑区上沿之下最后一个标题。
+ * 大纲条目与 DOM 标题按文档顺序一一对应（getOutline 就是顺序 walk 出来的）。
+ */
+function syncTocHighlight() {
+  if (!tocOpen) return
+  const headings = [...editorCtl.el.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')]
+  if (!headings.length) return
+  // 64px：标题滚到编辑区上部这么一段算「当前章节」，与 revealPos 的呼吸空间同一量级
+  const line = els.editorWrap.getBoundingClientRect().top + 64
+  let active = 0
+  headings.forEach((h, i) => { if (h.getBoundingClientRect().top <= line) active = i })
+  // 滚到底时最后一段可能整段都在「线」以下（文档尾巴没多少内容）：此时高亮最后一个标题，
+  // 否则用户拖到最底下，目录还指着倒数第二段
+  const wrap = els.editorWrap
+  const last = headings[headings.length - 1]
+  if (last.getBoundingClientRect().top > line && wrap.scrollHeight - (wrap.scrollTop + wrap.clientHeight) <= 2) {
+    active = headings.length - 1
+  }
+  els.tocList.querySelectorAll<HTMLElement>('.outline-item').forEach((el, i) => {
+    el.classList.toggle('active', i === active)
+  })
+}
+
+let tocSpyRaf = 0
+els.editorWrap.addEventListener('scroll', () => {
+  if (tocSpyRaf) return
+  tocSpyRaf = requestAnimationFrame(() => { tocSpyRaf = 0; syncTocHighlight() })
+})
 
 function setTocOpen(open: boolean) {
   if (open === tocOpen) return
@@ -737,11 +845,18 @@ function toggleToc() {
   setTocOpen(!tocOpen)
 }
 
-/** 目录按钮只在「有一篇文档、且不是纯文本模式」时给用 —— 那两种状态下取不到标题 */
+/** 目录按钮只在「有一篇文档、不是纯文本模式、且文档有标题」时给用。
+    没有标题时也置灰，并把原因写进 title —— 空面板弹出来只会让人以为点坏了（B4） */
 function syncTocButton() {
-  const usable = !!state.openPath && editorMode === 'visual'
+  const hasOutline = outlineItems().length > 0
+  const usable = !!state.openPath && editorMode === 'visual' && hasOutline
   els.btnToc.classList.toggle('hidden', !state.openPath)
   els.btnToc.disabled = !usable
+  if (!usable && state.openPath && editorMode === 'visual') {
+    els.btnToc.title = '这篇文档还没有标题'
+  } else {
+    els.btnToc.title = '文档目录 (Ctrl/Cmd + Shift + O)'
+  }
   if (!usable) setTocOpen(false)
 }
 
@@ -749,6 +864,9 @@ els.btnToc.addEventListener('click', toggleToc)
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
+    // 设置面板开着时只关设置：它在最上层，而这里和设置那个监听都挂在 document 上、
+    // 先注册的先跑 —— 不主动让位的话一次 Esc 会把目录和设置一起收掉（B5）
+    if (!els.settingsBackdrop.classList.contains('hidden')) return
     if (tocOpen) setTocOpen(false)
     return
   }
@@ -965,7 +1083,11 @@ async function localizeRemoteImages(urls: string[]) {
 }
 
 async function saveImageFiles(files: File[]) {
-  if (!state.root || !state.openPath) return
+  // ⚠️ 别再要求 state.root：独立窗口和单文件模式下它都是 null（openSingleFile 显式置空，
+  // 独立窗口从来不设置 root），而主进程侧本来就支持（assertInside 对 allowedFiles 里的
+  // 文档放行，allowFile 还会把文档所在目录加进 allowedRoots，app-file:// 也能显示）——
+  // 多了这个条件，那两种形态下粘贴 / 拖入 / 插入图片会静默失败，不报错也没提示（B1）
+  if (!state.openPath) return
   for (const file of files) {
     if (!file.type.startsWith('image/')) continue
     try {
@@ -976,7 +1098,7 @@ async function saveImageFiles(files: File[]) {
       editorCtl.insertImage(rel, '')
       setStatus(`已存储图片 ${res.displayPath}`)
     } catch (e) {
-      setStatus('图片保存失败', true)
+      setStatus('图片保存失败：' + ((e as Error).message || String(e)), true)
     }
   }
 }
@@ -1059,41 +1181,99 @@ async function createEntry(parent: string, type: 'file' | 'dir') {
 }
 
 async function doRename(oldPath: string, newName: string) {
-  let name = newName
-  if (/\.(md|markdown|mdown|mkd)$/i.test(oldPath) && !/\.[a-z0-9]+$/i.test(name)) name += '.md'
-  const error = await window.api.validateName(name)
-  if (error) {
+  try {
+    let name = newName
+    if (/\.(md|markdown|mdown|mkd)$/i.test(oldPath) && !/\.[a-z0-9]+$/i.test(name)) name += '.md'
+    const error = await window.api.validateName(name)
+    if (error) {
+      if (pendingOpenPath === oldPath) pendingOpenPath = null
+      await refreshTree()
+      setStatus(error, true)
+      return
+    }
+    // Markdown 文件必须保留 Markdown 扩展名：改成 .txt 之类它会从树里消失（MD_RE 过滤），
+    // 而文档还开着、还能保存，两边对不上（C13）
+    if (/\.(md|markdown|mdown|mkd)$/i.test(oldPath) && !/\.(md|markdown|mdown|mkd)$/i.test(name)) {
+      if (pendingOpenPath === oldPath) pendingOpenPath = null
+      await refreshTree()
+      setStatus('Markdown 文件需要保留 .md 扩展名', true)
+      return
+    }
+    // 这一篇（或它目录下的某一篇）正在别的窗口里开着时不能改：那个窗口的 state.openPath
+    // 还是旧路径，0.6s 后自动保存把新内容写回旧路径 —— 改名会让同一篇文档的两份编辑
+    // 分裂成两个文件，界面全程无提示（A1）
+    const blocked = await window.api.ownerPrefix(oldPath)
+    if (blocked.other) {
+      if (pendingOpenPath === oldPath) pendingOpenPath = null
+      await refreshTree()
+      setStatus(`「${basename(oldPath)}」正在其他窗口中打开，请先切换到那个窗口`, true)
+      return
+    }
+    const newPath = await window.api.rename(oldPath, name)
+    await refreshTree()
+    if (!newPath) {
+      if (pendingOpenPath === oldPath) pendingOpenPath = null
+      setStatus('已存在同名文件或文件夹', true)
+      return
+    }
+    // 树里的展开态 / 选中行 / 键盘焦点全是按路径记的：先搬到新路径（数据此时已是新的），
+    // 不搬的话改一个展开着的目录名它就自己折起来，选中的那行也丢高亮
+    treeCtl.renameKeys(oldPath, newPath)
+    if (pendingOpenPath === oldPath) {
+      pendingOpenPath = null
+      void openFile(newPath)
+    } else if (state.openPath && isPathOrInside(state.openPath, oldPath)) {
+      // 打开的正是被改名的这一篇、或它目录下的某一篇：路径要跟着走。否则下一次自动保存
+      // 会把新内容写回已经不存在的旧路径（连同整个目录被 fs:write 的 mkdir -p 重建），
+      // 树里看到的旧路径是旧内容、新路径再也收不到编辑（A2）
+      const next = newPath + state.openPath.slice(oldPath.length)
+      state.openPath = next
+      // 父目录变了，图片的相对解析基准也要跟着换（编辑器里还挂着旧目录）
+      editorCtl.setDir(dirname(next))
+      // 归属是认路径的：改名后要按新路径重新认领，否则这篇会变成「无人认领」，
+      // 别的窗口就能再打开它（同一个文件、两个窗口，正是要避免的情况）
+      const claim = await window.api.claimDocument(next)
+      if (!claim.ok) {
+        // 新路径被别的窗口占着（改名前的竞态）：这一篇不能再在本窗口编辑下去，
+        // 否则就是两处各自保存互相覆盖。清空编辑器，磁盘上保留已保存的内容。
+        state.openPath = null
+        state.dirty = false
+        lastSaved = ''
+        showEditorEmpty()
+        setStatus(`「${basename(next)}」已被另一个窗口打开，已在本窗口关闭`, true)
+        return
+      }
+      treeCtl.select(next)
+      updateBreadcrumb()
+    }
+  } catch (e) {
+    // fs:rename 在文件被占用（Windows 上另一个程序开着它）时会抛。调用方是
+    // void doRename(...)，不接住的话用户侧零反馈：输入框关了、树也没刷新，像点了没反应（B3）
     if (pendingOpenPath === oldPath) pendingOpenPath = null
     await refreshTree()
-    setStatus(error, true)
-    return
-  }
-  const newPath = await window.api.rename(oldPath, name)
-  await refreshTree()
-  if (!newPath) {
-    if (pendingOpenPath === oldPath) pendingOpenPath = null
-    setStatus('已存在同名文件或文件夹', true)
-    return
-  }
-  if (pendingOpenPath === oldPath) {
-    pendingOpenPath = null
-    void openFile(newPath)
-  }
-  if (state.openPath === oldPath) {
-    state.openPath = newPath
-    // 归属是认路径的：改名后要按新路径重新认领，否则这篇会变成「无人认领」，
-    // 别的窗口就能再打开它（同一个文件、两个窗口，正是要避免的情况）
-    const claim = await window.api.claimDocument(newPath)
-    if (!claim.ok) setStatus(`「${basename(newPath)}」已在另一个窗口中打开`, true)
-    treeCtl.select(newPath)
-    updateBreadcrumb()
-    document.title = `${basename(newPath)} — ${basename(displayRoot())}`
+    setStatus('重命名失败：' + ((e as Error).message || String(e)), true)
   }
 }
 
 async function doDelete(path: string) {
-  await window.api.trash(path)
-  if (state.openPath && (state.openPath === path || state.openPath.startsWith(path.replace(/\\/g, '/') + '/'))) {
+  try {
+    // 与 doRename 同一个理由：里面的文件正在别的窗口里开着时不能删 ——
+    // 那个窗口的自动保存会把文件连目录一起写回来（fs:write 自带 mkdir -p），
+    // 就是「删掉的文件又出现了」
+    const blocked = await window.api.ownerPrefix(path)
+    if (blocked.other) {
+      setStatus(`「${basename(path)}」正在其他窗口中打开，请先切换到那个窗口`, true)
+      return
+    }
+    await window.api.trash(path)
+  } catch (e) {
+    // shell.trashItem 失败（文件被占用等）时同样不能悄无声息（B3）
+    setStatus('删除失败：' + ((e as Error).message || String(e)), true)
+    return
+  }
+  // 打开的正是被删的这一篇、或它目录下的某一篇 → 编辑区退回空状态
+  // （⚠️ 祖先判断两边都要归一斜杠，见 isPathOrInside 的注释）
+  if (state.openPath && isPathOrInside(state.openPath, path)) {
     lastSaved = ''
     state.dirty = false
     showEditorEmpty()
@@ -1226,6 +1406,12 @@ $('#sidebar-resize').addEventListener('mousedown', (e) => {
   e.preventDefault()
   resizing = true
   document.body.classList.add('resizing')
+})
+// 双击把手恢复默认宽度（资源管理器也有类似行为，C11）
+$('#sidebar-resize').addEventListener('dblclick', () => {
+  sidebarPref = SIDEBAR_W
+  applySidebarWidth()
+  localStorage.setItem(SIDEBAR_W_KEY, String(sidebarPref))
 })
 document.addEventListener('mousemove', (e) => {
   if (!resizing) return
@@ -1377,18 +1563,29 @@ window.api.onFsChanged(() => {
   fsTimer = window.setTimeout(async () => {
     if (!state.root) return
     await refreshTree()
-    if (state.openPath && !state.dirty) {
-      try {
-        const md = await window.api.read(state.openPath)
-        if (md !== lastSaved) {
-          editorCtl.open(md, dirname(state.openPath))
-          els.sourceEditor.value = md
-          lastSaved = md
-          updateCount()
-          void localizeRemoteImages(editorCtl.remoteImageSources())
-        }
-      } catch { /* 文件可能刚被删除 */ }
+    if (!state.openPath) return
+    // 磁盘上的这份文件被别的程序改过了吗（A4）？拿打开 / 上次保存时记下的 mtime 比一眼。
+    // 自己刚保存的那次不会误报 —— doSave 里已经把 lastSavedMtime 更新成保存后的值了。
+    const st = await window.api.stat(state.openPath)
+    if (!st || st.mtimeMs <= lastSavedMtime) return
+    if (state.dirty) {
+      // 脏的时候自动保存会直接覆盖掉外部修改。不拦（用户的编辑优先），但要说话。
+      externalChange = true
+      setStatus('磁盘上的文件已被其他程序修改，继续保存将覆盖它', true)
+      return
     }
+    // 干净的时候照旧回读（这条路径早就验证过：不会用磁盘内容覆盖编辑器里的未保存编辑）
+    try {
+      const md = await window.api.read(state.openPath)
+      if (md !== lastSaved) {
+        editorCtl.open(md, dirname(state.openPath))
+        els.sourceEditor.value = md
+        lastSaved = md
+        noteDiskState(st)
+        updateCount()
+        void localizeRemoteImages(editorCtl.remoteImageSources())
+      }
+    } catch { /* 文件可能刚被删除 */ }
   }, 300)
 })
 
@@ -1426,5 +1623,9 @@ renderRecents()
 // 先同步一次导出可用性：菜单项是应用级的，谁聚焦就显示谁的状态，
 // 空窗口也要明确登记一次，否则会残留上一个聚焦窗口的判定
 syncExportAvailability()
+// 上次退出前的兜底保存（fs:flush）失败过：主进程把原因存在 userData，这里取出来提示。
+// 兜底保存本身失败时页面正在卸载、没有任何界面能显示错误，只能靠这一句（A3/A7）
+const saveError = await window.api.takeSaveError()
+if (saveError) setStatus(saveError, true, 6000)
 const initial = await window.api.initialFile()
 if (initial) void openSingleFile(initial)

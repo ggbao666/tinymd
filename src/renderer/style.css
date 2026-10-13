@@ -186,7 +186,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; bo
    滑块顶在「最近打开」这四个字旁边，看着像戳进了标题行。 */
 .recents {
   --recents-row-h: 49px; /* 一条 = 13px 文件名 + 1px 间距 + 11px 路径 + 上下各 8px 内边距 */
-  --recents-rows: 2; /* 默认只露 2 条，其余在列表内滚动 */
+  /* 默认露 3 条（曾为 2）：欢迎页 400px 高度下放得下（图标+标题+入口约 206px，
+     余量约 154px），再多就交给列表内部滚动（C6） */
+  --recents-rows: 3;
   width: 100%;
   margin-top: 18px;
   flex: 0 1 auto;
@@ -312,25 +314,29 @@ body.win #topbar { padding-right: 146px; }
   white-space: nowrap;
 }
 .crumb-folder { color: var(--text-2); }
+/* 可点的面包屑（文件夹部分）：点了在文件树里定位当前文档（C8） */
+.crumb-folder.clickable { cursor: pointer; }
+.crumb-folder.clickable:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .crumb-sep { color: var(--text-3); }
 .crumb-doc { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
 .crumb-doc.dirty::after { content: '•'; color: var(--accent); margin-left: 4px; }
 
-/* 底部状态栏：保存状态（左）+ 字数（右）常驻显示，不再悬浮遮挡正文 */
+/* 底部状态栏：保存状态（左）+ 字数（右）常驻显示，不再悬浮遮挡正文。
+   ⚠️ 不加 pointer-events / user-select: none —— 保存失败的错误信息、字数统计
+   都是用户想复制的内容，而栏里没有任何交互元素，放开是安全的（C3） */
 #status-pill {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 26px;
+  /* 26px 内容 + 1px 上边框 = --statusbar-h，目录面板的 bottom 用的是同一个数 */
+  height: calc(var(--statusbar-h) - 1px);
   padding: 0 14px;
   border-top: 1px solid var(--hairline);
   background: var(--bg);
   font-size: 12px;
   color: var(--text-3);
-  user-select: none;
-  pointer-events: none;
   white-space: nowrap;
 }
 #status-pill.hidden { display: none !important; }
@@ -355,7 +361,10 @@ body.win #topbar { padding-right: 146px; }
 .settings-window {
   width: min(760px, calc(100vw - 56px));
   height: min(540px, calc(100vh - 56px));
-  min-height: 430px;
+  /* ⚠️ min-height 也要跟着可用高度收：窗口最小高度 380 时可用高度只有 324，
+     写死 430 会把对话框撑出窗口、上下被切，而 overflow:hidden 又让内容滚不动（B2）。
+     100vh - 56 = 减去 .settings-backdrop 上下各 28px 的内边距 */
+  min-height: min(430px, calc(100vh - 56px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -765,7 +774,9 @@ body.resizing #sidebar-resize::before { background: var(--accent); }
   position: absolute;
   top: 10px;
   right: 14px;
-  bottom: 37px;
+  /* 底部让开状态栏：26px 内容 + 1px 上边框 + 10px 间隙。
+     ⚠️ 曾经这里写死 37px，状态栏一改高度目录就会压上去或露缝（C2） */
+  bottom: calc(var(--statusbar-h) + var(--toc-gap));
   width: 232px;
   display: flex;
   flex-direction: column;
@@ -815,6 +826,9 @@ body.toc-open #editor-empty { margin-right: 246px; }
   color: var(--text-3);
 }
 
+/* 正文滚动时高亮当前所在标题（C9，高亮由 main.ts 的 syncTocHighlight 打上） */
+.outline-item.active { background: var(--accent-soft); color: var(--accent); }
+
 .tree-row {
   --depth: 0;
   height: 29px;
@@ -832,6 +846,9 @@ body.toc-open #editor-empty { margin-right: 246px; }
 .tree-row:hover { background: var(--hover); }
 .tree-row.selected { background: var(--accent-soft); }
 .tree-row.selected .tree-name { color: var(--text); font-weight: 500; }
+/* 键盘焦点（C4）：行是 tabindex=0 的可聚焦元素，方向键在行间移动。
+   offset 收成 -1px，让焦点环贴在行的圆角内侧，不溢出行高 */
+.tree-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .tree-icon {
   flex: none;
@@ -942,6 +959,11 @@ body.toc-open #editor-empty { margin-right: 246px; }
      渲染层启动时会用实测值覆盖它，这里给 0 是「没有滚动条」场景的默认 ——
      导出 PDF 的隐藏窗口没有滚动条，正好吃这个值，左右内边距照样相等。 */
   --sb-w: 0px;
+  /* 底部状态栏的总高度（26px 内容 + 1px 上边框）。#status-pill 的 height 与
+     #toc-float 的 bottom 都由它算出，改状态栏高度时只改这一处（C2）。 */
+  --statusbar-h: 27px;
+  /* 目录面板与状态栏之间的间隙 */
+  --toc-gap: 10px;
 }
 
 #content {
@@ -1059,8 +1081,10 @@ body.toc-open #editor-empty { margin-right: 246px; }
   width: 100%;
   height: 100%;
   margin: 0;
-  /* 与 #editor 同一套算法：右边扣掉滚动条宽度，纯文本模式下的左右留白才一样宽 */
-  padding: 48px calc(var(--content-pad) - var(--sb-w)) 32px var(--content-pad);
+  /* 与 #editor 同一套算法：右边扣掉滚动条宽度，纯文本模式下的左右留白才一样宽。
+     ⚠️ 顶部留白与 #editor 保持同一个数（34px）—— 曾经这里是 48，切换模式时
+     第一行的位置会跳一下（C1） */
+  padding: 34px calc(var(--content-pad) - var(--sb-w)) 32px var(--content-pad);
   scrollbar-gutter: stable;
   resize: none;
   outline: none;
@@ -1304,7 +1328,8 @@ body.toc-open #editor-empty { margin-right: 246px; }
   position: fixed;
   z-index: 260;
   width: 150px;
-  max-height: 280px;
+  /* 语言从 14 种扩到 common 全集（35 项）后靠内部滚动，别把菜单拉得太高（C10） */
+  max-height: 340px;
   overflow-y: auto;
   padding: 5px;
   background: var(--bg);
@@ -1342,6 +1367,8 @@ body.toc-open #editor-empty { margin-right: 246px; }
   border-radius: 12px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
 }
+/* 目录展开时正文让出 246px，浮层要跟着让位 —— 否则它会压在目录面板上（B6） */
+body.toc-open #link-popover { right: calc(16px + 246px); }
 #link-input {
   width: 260px;
   font: inherit;
