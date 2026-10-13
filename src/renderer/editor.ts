@@ -282,9 +282,14 @@ export function markdownToDoc(markdown: string, fileDir: string): JSONContent {
 
 export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
   // 气泡菜单元素在 index.html 中静态声明；显隐由插件用 visibility 控制，
-  // 必须摘掉 hidden class（display:none 会永久压制插件）
+  // 必须摘掉 hidden class（display:none 会永久压制插件）。
+  // ⚠️ 插件的 hide() 开头是 if (!isVisible) return —— 从未 show 过时 hide 是空操作，
+  // 元素会以「静态文档流位置 + 默认可见」留在页面上；所以初始态要手动摆成插件
+  // hide() 会摆出的那副样子（visibility:hidden + opacity:0），首次拦截才真的不可见。
   const bubbleEl = document.getElementById('bubble-menu') as HTMLElement
   bubbleEl.classList.remove('hidden')
+  bubbleEl.style.visibility = 'hidden'
+  bubbleEl.style.opacity = '0'
 
   const editor = new Editor({
     element: host,
@@ -299,10 +304,15 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
         element: bubbleEl,
         shouldShow: ({ state, view }) => {
           // 空选区不弹；代码块内行内格式无意义也不弹；
+          // 标题不做任何行内样式（高亮有事务层剥、加粗/斜体会破坏大纲语义），
+          // 选区两端只要有一端落在标题里（含从正文划进标题的跨块选区）就不弹；
           // 点选图片等产生的是节点选区（NodeSelection），格式按钮无意义，同样不弹
           if (state.selection.empty || !view.hasFocus()) return false
           if (state.selection instanceof NodeSelection) return false
-          return state.selection.$from.parent.type.name !== 'codeBlock'
+          const blocked = (rp: typeof state.selection.$from) =>
+            ['codeBlock', 'heading'].includes(rp.parent.type.name)
+          if (blocked(state.selection.$from) || blocked(state.selection.$to)) return false
+          return true
         },
         options: { placement: 'top', offset: 8 },
       }),
@@ -359,8 +369,10 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     },
   })
 
-  slash = createSlashMenu(editor, [
-    { icon: slashGlyph('H1'), title: '标题 1', hint: '大节标题', keywords: ['h1', 'heading', 'biaoti', 'bt'], run: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
+  // 调试/验证脚本用：真实 Electron 验证（build/_bubblecheck.cjs 等）需要从控制台读 PM 选区
+  ;(window as unknown as { __tinymdEditor?: Editor }).__tinymdEditor = editor
+
+  slash = createSlashMenu(editor, [    { icon: slashGlyph('H1'), title: '标题 1', hint: '大节标题', keywords: ['h1', 'heading', 'biaoti', 'bt'], run: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
     { icon: slashGlyph('H2'), title: '标题 2', hint: '小节标题', keywords: ['h2', 'heading', 'biaoti', 'bt'], run: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
     { icon: slashGlyph('H3'), title: '标题 3', hint: '次级小标题', keywords: ['h3', 'heading', 'biaoti', 'bt'], run: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
     { icon: slashIcons.ul, title: '无序列表', hint: '简单的项目符号列表', keywords: ['ul', 'bullet', 'list', 'liebiao', 'lb'], run: () => editor.chain().focus().toggleBulletList().run() },
