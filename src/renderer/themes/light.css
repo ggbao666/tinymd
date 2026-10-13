@@ -22,11 +22,17 @@ html.theme-light {
   --accent-softer: rgba(10, 132, 255, 0.06);
 
   /* 代码：浅墨灰底 */
+  /* 顶栏高度：#topbar、macOS 红绿灯、Windows 标题栏叠加层都按它对齐 */
+  --topbar-h: 38px;
   --code-bg: rgba(38, 38, 42, 0.055);
   --inline-code-bg: rgba(38, 38, 42, 0.065);
   --inline-code-text: #26262a;
   /* ==高亮== 底色：浅色下就是常规荧光笔黄 */
   --mark-bg: rgba(255, 214, 10, 0.55);
+  /* 查找命中高亮：亮底上要比 ==高亮== 再实一点、往橙推，才能压住正文 */
+  --find-hit-bg: rgba(255, 193, 7, 0.62);
+  --find-hit-bg-current: rgba(255, 146, 0, 0.72);
+  --find-hit-ring: rgba(180, 130, 0, 0.35);
 
   /* 语法高亮：GitHub Light 官方色板 */
   --syn-keyword: #cf222e;

@@ -46,6 +46,9 @@ build/_verify_treeact.png
 build/_verify_treeact_result.json
 build/_verify_fixes.json
 build/_verify_fixes.stage.json
+build/_verify_find.json
+build/_verify_find.stage.json
+build/_verify_find_dump.txt
 build/_shots/
 build/export-preview.*
 build/_ci_monitor.cjs

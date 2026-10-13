@@ -38,6 +38,8 @@
 | `Ctrl/Cmd + O` | 打开文件夹 |
 | `Ctrl/Cmd + N` | 新建文件 |
 | `Ctrl/Cmd + S` | 保存 |
+| `Ctrl/Cmd + F` | 查找（富文本高亮命中，纯文本定位光标） |
+| `Ctrl/Cmd + H` | 查找并替换（展开替换栏） |
 | `Ctrl/Cmd + P` | 导出为 PDF（需已打开文档） |
 | `Ctrl/Cmd + Shift + P` | 导出为 Word（需已打开文档） |
 | `Ctrl/Cmd + Shift + O` | 文档目录（显示 / 收起） |

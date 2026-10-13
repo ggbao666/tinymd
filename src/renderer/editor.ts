@@ -11,10 +11,12 @@ import { BubbleMenu } from '@tiptap/extension-bubble-menu'
 import { Placeholder } from '@tiptap/extensions'
 import { Markdown } from '@tiptap/markdown'
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { NodeSelection, Selection } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { normalizeMarkdownImagePaths, resolveRel, toMediaUrl } from './util'
 import { createSlashMenu, slashGlyph, slashIcons } from './slash'
 import { createCodeLangMenu } from './code-lang'
+import { findRangesInDoc, type FindRange } from './find'
 
 export interface EditorCallbacks {
   onChange(): void
@@ -103,6 +105,45 @@ const CodeBlockLangBadge = CodeBlockLowlight.extend({
       'pre',
       mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, lang ? { 'data-language': lang } : {}),
       ['code', { class: lang ? this.options.languageClassPrefix + lang : null }, 0],
+    ]
+  },
+})
+
+/**
+ * 查找命中的高亮装饰：只画背景，不动文档内容，所以撤销栈和导出都不受影响
+ * （导出走离线渲染、天生不带这个插件 —— 见上面的 @tiptap/markdown 说明）。
+ *   位置由 main.ts 的查找条算好后经 setFindHits 塞进来；文档一变就自动撤掉高亮，
+ * 因为那时候旧坐标已经不可信了，等 UI 侧重新搜一次再画。
+ */
+const FIND_HIT_KEY = new PluginKey<{ ranges: FindRange[]; current: number }>('tinymdFindHits')
+
+const FindHighlight = Extension.create({
+  name: 'findHighlight',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: FIND_HIT_KEY,
+        state: {
+          init: () => ({ ranges: [] as FindRange[], current: -1 }),
+          apply(tr, prev) {
+            const meta = tr.getMeta(FIND_HIT_KEY) as { ranges: FindRange[]; current: number } | undefined
+            if (meta) return meta
+            return tr.docChanged ? { ranges: [] as FindRange[], current: -1 } : prev
+          },
+        },
+        props: {
+          decorations(state) {
+            const s = FIND_HIT_KEY.getState(state)
+            if (!s || !s.ranges.length) return null
+            return DecorationSet.create(
+              state.doc,
+              s.ranges.map((r, i) =>
+                Decoration.inline(r.from, r.to, { class: i === s.current ? 'find-hit is-current' : 'find-hit' }),
+              ),
+            )
+          },
+        },
+      }),
     ]
   },
 })
@@ -214,6 +255,8 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     // 内容扩展与离线渲染共用；只在这里额外挂交互扩展。
     extensions: [
       ...contentExtensions(() => currentDir),
+      // 交互相关扩展只挂在真编辑器上，离线渲染（导出）不要 —— 否则抢 DOM、带多余装饰
+      FindHighlight,
       Placeholder.configure({ placeholder: '开始写点什么…' }),
       BubbleMenu.configure({
         element: bubbleEl,
@@ -588,6 +631,71 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     },
     doc(): PMNode {
       return editor.state.doc
+    },
+    // ---------- 查找 / 替换（UI 在 main.ts，这里只提供文档侧原语） ----------
+    /** 查 query 的全部命中，返回文档坐标（按位置升序） */
+    findRanges(query: string, caseSensitive: boolean): FindRange[] {
+      return findRangesInDoc(editor.state.doc, query, caseSensitive)
+    },
+    /** 画 / 清命中高亮。ranges 为文档坐标，current 是「当前这一条」的下标 */
+    showFindHits(ranges: FindRange[], current: number) {
+      editor.view.dispatch(editor.state.tr.setMeta(FIND_HIT_KEY, { ranges, current }))
+    },
+    clearFindHits() {
+      editor.view.dispatch(editor.state.tr.setMeta(FIND_HIT_KEY, { ranges: [], current: -1 }))
+    },
+    /** 把某一段滚进视野并选中（查找条上下翻用）。⚠️ 不带 focus()，否则抢走查找框的光标 */
+    revealRange(from: number, to: number) {
+      try {
+        const tr = editor.state.tr
+          .setSelection(TextSelection.create(editor.state.doc, from, to))
+          .scrollIntoView()
+        editor.view.dispatch(tr)
+      } catch { /* 位置可能已失效 */ }
+    },
+    /** 当前光标 / 选区起点 */
+    caretPos(): number {
+      return editor.state.selection.from
+    },
+    selectionEmpty(): boolean {
+      return editor.state.selection.empty
+    },
+    getRangeText(from: number, to: number): string {
+      try {
+        return editor.state.doc.textBetween(from, to, '\n', '\n')
+      } catch { return '' }
+    },
+    /** 当前选中的文本（空选区返回 ''）。查找条拿它预填关键词用 */
+    selectionText(): string {
+      const { from, to, empty } = editor.state.selection
+      return empty ? '' : this.getRangeText(from, to)
+    },
+    /**
+     * 一次替换全部命中。**从后往前**在**同一个事务**里做：
+     * 后面的改动不会影响前面待用的位置，于是所有区间都能原样使用。
+     * （正向遍历会因为每次替换后长度变化而让后续下标全部失效。）
+     */
+    replaceAllRanges(ranges: FindRange[], text: string): number {
+      if (!ranges.length) return 0
+      try {
+        const tr = editor.state.tr
+        for (let i = ranges.length - 1; i >= 0; i--) {
+          const r = ranges[i]
+          tr.insertText(text, r.from, r.to)
+        }
+        editor.view.dispatch(tr.scrollIntoView())
+        return ranges.length
+      } catch { return 0 }
+    },
+    /** 替换当前命中的文本；返回是否成功 */
+    replaceRange(from: number, to: number, text: string): boolean {
+      try {
+        // 用 insertText 而不是 insertContentAt：前者继承所在位置的 marks，
+        // 且按纯文本插入，替换内容里的 < 或 & 不会被当 HTML 解析
+        const tr = editor.state.tr.insertText(text, from, to)
+        editor.view.dispatch(tr.scrollIntoView())
+        return true
+      } catch { return false }
     },
     destroy() { langMenu.close(); slash?.close(); editor.destroy() },
   }

@@ -13,11 +13,17 @@ html.theme-neutral {
   --accent-hover: #0071e3;
   --accent-soft: rgba(10, 132, 255, 0.12);
   --accent-softer: rgba(10, 132, 255, 0.08);
+  /* 顶栏高度：#topbar、macOS 红绿灯、Windows 标题栏叠加层都按它对齐 */
+  --topbar-h: 38px;
   --code-bg: rgba(255, 255, 255, 0.075);
   --inline-code-bg: rgba(255, 255, 255, 0.08);
   --inline-code-text: #f0f0f1;
   /* ==高亮== 底色：深色下用半透明暖黄，白字仍可读 */
   --mark-bg: rgba(255, 214, 10, 0.28);
+  /* 查找命中高亮：与 ==高亮== 同色系但更亮，当前命中再往橙推一档，一眼能分出「在哪一条」 */
+  --find-hit-bg: rgba(255, 214, 10, 0.30);
+  --find-hit-bg-current: rgba(255, 170, 0, 0.55);
+  --find-hit-ring: rgba(255, 214, 10, 0.40);
   /* 语法高亮：GitHub Dark 官方色板 */
   --syn-keyword: #ff7b72;
   --syn-string: #a5d6ff;

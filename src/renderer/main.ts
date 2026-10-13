@@ -8,6 +8,7 @@ import type { JSONContent } from '@tiptap/core'
 import { createTree } from './tree'
 import { showContextMenu } from './contextmenu'
 import { openImageViewer } from './imageviewer'
+import { findRangesInText, nextMatchIndex } from './find'
 import { basename, dirname, encodeMarkdownPath, imageFileName, relativeFrom, resolveRel, type ImageStorageMode, type ImageStorageSettings, type PopupItem } from './util'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -103,14 +104,23 @@ let saveTimer: number | undefined
 
 // ---------- editor ----------
 
+/**
+ * 文档被改动（用户敲字，或查找替换这类程序化编辑）。
+ * 不依赖 Tiptap 的 onUpdate 是否触发 —— 程序化事务那条路不可靠，
+ * 统一在这里置脏 + 排自动保存，避免「改了但没存、切换模式后被回读覆盖」。
+ */
+function onDocumentEdited() {
+  state.dirty = true
+  setStatus('编辑中…')
+  updateBreadcrumb()
+  updateCount()
+  scheduleOutline()
+  scheduleSave()
+}
+
 const editorCtl: EditorCtl = createEditor(els.editor, {
   onChange() {
-    state.dirty = true
-    setStatus('编辑中…')
-    updateBreadcrumb()
-    updateCount()
-    scheduleOutline()
-    scheduleSave()
+    onDocumentEdited()
   },
   onImageFiles(files) {
     void saveImageFiles(files)
@@ -604,9 +614,13 @@ function updateEditorModeButton() {
 function setEditorMode(mode: EditorMode) {
   if (!state.openPath || mode === editorMode) return
   if (mode === 'source') {
-    els.sourceEditor.value = state.dirty ? editorCtl.getMarkdown() : lastSaved
+    // ⚠️ 一律以**实时文档**为准，不看 state.dirty / lastSaved：
+    // 程序化编辑（查找替换）不保证把 dirty 置位，而 lastSaved 是「上次成功写入磁盘的内容」——
+    // 拿它当切换依据，会在自动保存还没落盘时把刚做的替换整体覆盖回旧文本（丢数据）。
+    els.sourceEditor.value = editorCtl.getMarkdown()
     state.dirty = els.sourceEditor.value !== lastSaved
     hideCodeCopy() // 富文本里的代码块没了，悬浮按钮跟着藏
+    closeFind() // 换了一套编辑区，查找结果（文档坐标）已经对不上号了
   } else {
     const markdown = els.sourceEditor.value
     // 纯文本是切回后的唯一数据源，整篇重新解析，避免两种编辑状态不一致。
@@ -879,6 +893,9 @@ document.addEventListener('keydown', (event) => {
     // 链接浮层开着时只关浮层（E6，让位法同上）：浮层输入框自己的 Esc 监听
     // 和这个 document 监听会一起触发，不让位的话一次 Esc 把浮层和目录一起收掉
     if (!els.linkPopover.classList.contains('hidden')) return
+    // 查找条同上：它在最上层，一次 Esc 只收它（它自己的监听也会 stopPropagation，
+    // 这里双保险 —— 焦点不在查找框里时（比如刚点过正文）也能只收查找条）
+    if (!findBar.classList.contains('hidden')) { closeFind(); return }
     if (tocOpen) setTocOpen(false)
     return
   }
@@ -886,6 +903,18 @@ document.addEventListener('keydown', (event) => {
   if (mod && event.shiftKey && (event.key === 'o' || event.key === 'O')) {
     event.preventDefault()
     toggleToc()
+  }
+  // 查找 / 替换。⌘/Ctrl + F 与 + H 在 Electron 里没有默认行为（没有菜单项占用），
+  // 但仍要 preventDefault —— Windows 上 Ctrl+F 会触发窗口的查找条（如 devtools 未开时不影响），
+  // Ctrl+H 在部分系统上是「历史记录」
+  if (mod && !event.shiftKey && (event.key === 'f' || event.key === 'F')) {
+    event.preventDefault()
+    openFind(false)
+    return
+  }
+  if (mod && !event.shiftKey && (event.key === 'h' || event.key === 'H')) {
+    event.preventDefault()
+    openFind(true)
   }
 })
 
@@ -1462,6 +1491,205 @@ codeCopyBtn.addEventListener('click', () => {
     ta.remove()
   })
 })
+
+// ---------- 查找 / 替换 ----------
+
+const findBar = $('#find-bar')
+const findInput = $('#find-input') as HTMLInputElement
+const findCount = $('#find-count')
+const findReplaceRow = $('#find-replace-row')
+const findReplaceInput = $('#find-replace-input') as HTMLInputElement
+const findToggle = $('#find-toggle-replace') as HTMLButtonElement
+const findCaseBtn = $('#find-case') as HTMLButtonElement
+const findPrevBtn = $('#find-prev') as HTMLButtonElement
+const findNextBtn = $('#find-next') as HTMLButtonElement
+
+/**
+ * 命中区间。富文本模式是**文档坐标**（随文档结构变化），纯文本模式是
+ * textarea 的**字符串下标** —— 两套坐标互不通用，所以每次都按当前模式重算。
+ */
+let findHits: { from: number; to: number }[] = []
+let findIndex = -1
+let findCase = false
+let findQuery = ''
+
+function refreshHits() {
+  findQuery = findInput.value
+  findHits = !findQuery
+    ? []
+    : editorMode === 'source'
+      ? findRangesInText(els.sourceEditor.value, findQuery, findCase)
+      : editorCtl.findRanges(findQuery, findCase)
+}
+
+function paintFind() {
+  // 纯文本没有装饰层，藏起富文本那边的旧高亮（切模式时用得上）
+  if (editorMode === 'source') editorCtl.clearFindHits()
+  else editorCtl.showFindHits(findHits, findIndex)
+  findCount.textContent = !findQuery ? '' : findHits.length ? `${findIndex + 1}/${findHits.length}` : '无结果'
+  const none = !findHits.length
+  findPrevBtn.disabled = none
+  findNextBtn.disabled = none
+  findInput.classList.toggle('no-hit', !!findQuery && none)
+}
+
+function gotoIndex(i: number) {
+  if (!findHits.length) return
+  findIndex = ((i % findHits.length) + findHits.length) % findHits.length
+  const r = findHits[findIndex]
+  if (editorMode === 'source') els.sourceEditor.setSelectionRange(r.from, r.to)
+  else editorCtl.revealRange(r.from, r.to)
+  paintFind()
+}
+
+/** 定位到光标所在的（或之后的第一个）命中；回车继续往下走 */
+function searchFromCaret() {
+  refreshHits()
+  if (!findHits.length) { findIndex = -1; paintFind(); return }
+  gotoIndex(nextMatchIndex(findHits, currentCaret(), 1))
+}
+
+function stepFind(dir: 1 | -1) {
+  if (!findHits.length) { searchFromCaret(); return }
+  gotoIndex(findIndex + dir)
+}
+
+function currentCaret(): number {
+  return editorMode === 'source' ? els.sourceEditor.selectionStart : editorCtl.caretPos()
+}
+
+/**
+ * 替换当前命中，然后停在下一条。
+ * 富文本：替换会让文档变更、插件自动撤掉旧高亮，所以替换完**重新搜一遍**；
+ * 下标保持不变 —— 原来那条已被换掉，同一个下标自然指向下一条未替换的命中。
+ */
+function replaceOne(): boolean {
+  if (!findHits.length || findIndex < 0) return false
+  const r = findHits[findIndex]
+  const text = findReplaceInput.value
+  if (editorMode === 'source') {
+    const ta = els.sourceEditor
+    ta.setSelectionRange(r.from, r.to)
+    ta.setRangeText(text, r.from, r.to, 'end')
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  } else {
+    editorCtl.replaceRange(r.from, r.to, text)
+    onDocumentEdited() // 置脏 + 排自动保存（程序化事务不保证触发 onUpdate）
+  }
+  const keep = findIndex
+  searchFromCaret()
+  if (findHits.length) gotoIndex(Math.min(keep, findHits.length - 1))
+  return true
+}
+
+function replaceAll(): boolean {
+  refreshHits()
+  if (!findHits.length) return false
+  const text = findReplaceInput.value
+  const n = findHits.length
+  if (editorMode === 'source') {
+    const value = els.sourceEditor.value
+    // 一次拼完再整体写回：逐个替换会让后面的下标陆续失效
+    let next = ''
+    let last = 0
+    for (const r of findHits) { next += value.slice(last, r.from) + text; last = r.to }
+    next += value.slice(last)
+    els.sourceEditor.value = next
+    els.sourceEditor.dispatchEvent(new Event('input', { bubbles: true }))
+  } else {
+    editorCtl.replaceAllRanges(findHits, text)
+    onDocumentEdited() // 同上：全部替换也要落盘
+  }
+  searchFromCaret()
+  return true
+}
+
+function openFind(withReplace: boolean) {
+  if (!state.openPath) { setStatus('还没有打开文档', true); return }
+  findBar.classList.remove('hidden')
+  // 已经有选中文本时直接拿它当关键词，省得再敲一遍
+  if (editorMode === 'source') {
+    const ta = els.sourceEditor
+    if (ta.selectionEnd > ta.selectionStart) {
+      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd)
+      if (!/\n/.test(sel)) findInput.value = sel
+    }
+  } else {
+    const sel = editorCtl.selectionText()
+    if (sel && !/\n/.test(sel)) findInput.value = sel
+  }
+  if (withReplace) {
+    findReplaceRow.classList.remove('hidden')
+    findToggle.setAttribute('aria-expanded', 'true')
+  }
+  refreshHits()
+  gotoIndex(nextMatchIndex(findHits, currentCaret(), 1))
+  paintFind()
+  findInput.focus()
+  findInput.select()
+}
+
+function closeFind() {
+  findBar.classList.add('hidden')
+  findReplaceRow.classList.add('hidden')
+  findToggle.setAttribute('aria-expanded', 'false')
+  findHits = []
+  findIndex = -1
+  findQuery = ''
+  editorCtl.clearFindHits()
+}
+
+findInput.addEventListener('input', () => {
+  refreshHits()
+  if (!findHits.length) { findIndex = -1; paintFind(); return }
+  gotoIndex(nextMatchIndex(findHits, currentCaret(), 1))
+})
+findCaseBtn.addEventListener('click', () => {
+  findCase = !findCase
+  findCaseBtn.setAttribute('aria-pressed', String(findCase))
+  findCaseBtn.classList.toggle('active', findCase)
+  refreshHits()
+  if (findHits.length) gotoIndex(nextMatchIndex(findHits, currentCaret(), 1))
+  else { findIndex = -1; paintFind() }
+})
+findPrevBtn.addEventListener('click', () => stepFind(-1))
+findNextBtn.addEventListener('click', () => stepFind(1))
+$('#find-replace-one').addEventListener('click', () => {
+  if (!replaceOne()) setStatus('没有可替换的内容', true)
+  else setStatus('已替换 1 处')
+  findInput.focus()
+})
+$('#find-replace-all').addEventListener('click', () => {
+  const n = findHits.length
+  if (!n) { setStatus('没有可替换的内容', true); return }
+  replaceAll()
+  setStatus(`已替换 ${n} 处`)
+  findInput.focus()
+})
+$('#find-close').addEventListener('click', closeFind)
+findToggle.addEventListener('click', () => {
+  const open = findReplaceRow.classList.toggle('hidden') === false
+  findToggle.setAttribute('aria-expanded', String(open))
+  if (open) findReplaceInput.focus()
+  else findInput.focus()
+})
+
+// 查找条内的回车 / Esc 自己消化掉，别冒到 document 上去（Enter 有全局绑定，
+// Esc 会把目录也一起收掉 —— 同 E6 的 stopPropagation 理由）
+for (const input of [findInput, findReplaceInput]) {
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      stepFind(e.shiftKey ? -1 : 1)
+      return
+    }
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      closeFind()
+    }
+  })
+}
 
 // ---------- sidebar / misc buttons ----------
 

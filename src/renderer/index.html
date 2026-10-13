@@ -139,6 +139,34 @@
       <button id="link-cancel" class="btn-ghost mini">取消</button>
     </div>
 
+    <!-- 查找 / 替换浮层：贴在编辑区右上角，正文不动（Ctrl/Cmd + F 查找，+ H 带替换） -->
+    <div id="find-bar" class="find-bar hidden" role="search" aria-label="查找和替换">
+      <div class="find-row">
+        <button id="find-toggle-replace" class="find-chevron" title="展开替换 (Ctrl/Cmd + H)" aria-label="展开替换" aria-expanded="false">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 3.5 4 4.5-4 4.5"/></svg>
+        </button>
+        <input id="find-input" type="text" placeholder="查找…" spellcheck="false" aria-label="查找" />
+        <span id="find-count" class="find-count" aria-live="polite"></span>
+        <button id="find-prev" class="icon-btn small" title="上一个 (Shift + Enter)" aria-label="上一个">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 9.5 4-4 4 4"/></svg>
+        </button>
+        <button id="find-next" class="icon-btn small" title="下一个 (Enter)" aria-label="下一个">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6.5 4 4 4-4"/></svg>
+        </button>
+        <button id="find-case" class="find-case" title="区分大小写" aria-label="区分大小写" aria-pressed="false">Aa</button>
+        <button id="find-close" class="icon-btn small" title="关闭 (Esc)" aria-label="关闭">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
+      <div id="find-replace-row" class="find-row hidden">
+        <!-- 占位：让下面那行输入框与上面的查找框左对齐（右侧是同样宽度的折叠箭头） -->
+        <span class="find-chevron-space" aria-hidden="true"></span>
+        <input id="find-replace-input" type="text" placeholder="替换为…" spellcheck="false" aria-label="替换为" />
+        <button id="find-replace-one" class="btn-ghost mini">替换</button>
+        <button id="find-replace-all" class="btn-ghost mini">全部替换</button>
+      </div>
+    </div>
+
     <!-- 设置中心：左侧分类，右侧承载可持续扩展的设置项 -->
     <div id="settings-backdrop" class="settings-backdrop hidden">
       <section id="settings-window" class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-heading">
