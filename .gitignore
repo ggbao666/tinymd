@@ -29,3 +29,20 @@ build/run*.log
 build/run*.txt
 build/render_log.txt
 build/welcome-mark-check.*
+
+# build/ 下自动生成的验证截图与预览产物（不动已追踪的 icon 源资源）
+build/codeblock-radius-*.png
+build/gutter-*.png
+build/main-window*.png
+build/panel*.png
+build/panels-*.png
+build/single-window-*.png
+build/standalone-window*.png
+build/tocbtn-*.png
+build/w1000-*.png
+build/width-*.png
+build/pad20-*.png
+build/_verify_treeact.png
+build/_verify_treeact_result.json
+build/export-preview.*
+build/_ci_monitor.cjs
