@@ -54,6 +54,10 @@ const imageViewerData = new Map()
 let currentRoot = null
 let watcher = null
 let watchTimer = null
+// 单文件模式 / 独立窗口没有工作空间可监听：渲染层打开文档后经 fs:watchFile
+// 按窗口登记一份「这一篇所在目录」的监听（窗口关了跟着收），事件同样走
+// onFsEvent 的去抖广播 —— 外部修改检测于是在所有窗口形态下都能工作（D4）。
+const fileWatchers = new Map() // webContents.id -> fs.FSWatcher
 const allowedRoots = new Set()
 const allowedFiles = new Set()
 let pendingOpenFile = null
@@ -73,7 +77,17 @@ function allowFile(p) {
     const abs = path.resolve(String(p ?? ''))
     if (!MD_RE.test(abs)) return null
     if (!fs.statSync(abs).isFile()) return null
-    if (allowedFiles.size > 200) allowedFiles.clear()
+    // 超过上限改为「从最旧的开始逐条淘汰」而不是一刀切 clear（D3）：clear() 会把
+    // 独立窗口 / 单文件模式正在编辑的文档的读写权限也一并抹掉，之后的自动保存全部失败。
+    // 正被某个窗口占着的文档（归属表里有它的键）永远不淘汰；全被占着就任其增长。
+    if (allowedFiles.size > 200) {
+      const held = new Set(documentOwners.keys())
+      for (const f of allowedFiles) {
+        if (allowedFiles.size <= 200) break
+        if (held.has(docKey(f))) continue
+        allowedFiles.delete(f)
+      }
+    }
     allowedFiles.add(abs)
     // 文件所在目录同时作为「可读取媒体目录」：单文件模式下文档旁边的
     // assets/ 图片要能经 app-file:// 显示（该集合只用于读图和「在文件夹中打开」）
@@ -304,6 +318,9 @@ function attachEditorWindow(w, initialFile) {
     editorWindows.delete(w)
     windowInitialFile.delete(wcId)
     exportEnabled.delete(wcId)
+    // 它登记过的单文件目录监听一起收掉（D4）
+    const fw = fileWatchers.get(wcId)
+    if (fw) { try { fw.close() } catch { /* ignore */ } fileWatchers.delete(wcId) }
     // 窗口没了，它占着的文档要放出来，否则那篇从此谁都打不开
     releaseDocument(w)
     refreshExportMenu()
@@ -601,6 +618,20 @@ function registerIpc() {
       const st = await fsp.stat(abs)
       return { mtimeMs: st.mtimeMs, size: st.size }
     } catch { return null }
+  })
+
+  // 单文件 / 独立窗口模式：让主进程监听当前文档所在的目录（D4，见文件头 fileWatchers 注释）。
+  // 同一窗口再次调用会先关掉旧的再挂新的（切换文档时换目标）。
+  ipcMain.handle('fs:watchFile', (e, p) => {
+    try {
+      const abs = assertReadable(p)
+      const prev = fileWatchers.get(e.sender.id)
+      if (prev) { try { prev.close() } catch { /* ignore */ } }
+      const fw = fs.watch(path.dirname(abs), { recursive: false }, onFsEvent)
+      fw.on('error', () => { /* 目录被移除等，静默 */ })
+      fileWatchers.set(e.sender.id, fw)
+      return true
+    } catch { return false }
   })
 
   ipcMain.handle('fs:write', async (_e, p, content) => {
@@ -984,6 +1015,16 @@ function sendOpenFile(p) {
   const abs = allowFile(p)
   if (!abs) return
   if (win && !win.isDestroyed()) win.webContents.send('open-file', abs)
+  else if (editorWindows.size) {
+    // 主窗口不在了但还有独立窗口活着（D2）：pendingOpenFile 只在 createWindow 时被消费，
+    // 不派发的话从资源管理器双击 .md 会毫无反应。优先给聚焦的那个，没有就给最后创建的。
+    const focused = BrowserWindow.getFocusedWindow()
+    const target = focused && editorWindows.has(focused) ? focused : [...editorWindows][editorWindows.size - 1]
+    if (!target.isDestroyed()) {
+      focusWindow(target)
+      target.webContents.send('open-file', abs)
+    }
+  }
   else pendingOpenFile = abs
 }
 

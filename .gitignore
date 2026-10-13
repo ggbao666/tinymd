@@ -44,5 +44,7 @@ build/width-*.png
 build/pad20-*.png
 build/_verify_treeact.png
 build/_verify_treeact_result.json
+build/_verify_fixes.json
+build/_verify_fixes.stage.json
 build/export-preview.*
 build/_ci_monitor.cjs

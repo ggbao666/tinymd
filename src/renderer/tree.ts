@@ -225,6 +225,26 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     return el
   }
 
+  /**
+   * 打开文件并接住失败回退（click 与 Enter 两条路共用，E4）：先乐观选中，
+   * 打开失败（被别的窗口占用 / 读取失败）时把高亮退回上一篇 —— 否则树指着
+   * 的那一篇和编辑器里的并不是同一个。
+   */
+  function openWithFallback(path: string) {
+    const previous = selectedPath
+    selectedPath = path
+    render()
+    const result = h.onOpenFile(path)
+    if (result && typeof (result as Promise<boolean>).then === 'function') {
+      void (result as Promise<boolean>).then((ok) => {
+        if (ok === false && selectedPath === path) { selectedPath = previous; render() }
+      })
+    } else if (result === false) {
+      selectedPath = previous
+      render()
+    }
+  }
+
   container.addEventListener('click', (e) => {
     const target = e.target as HTMLElement
     const input = target.closest<HTMLInputElement>('input.tree-rename')
@@ -240,19 +260,8 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       else expanded.add(path)
       render()
     } else {
-      const previous = selectedPath
-      selectedPath = path
-      render()
-      // 打开是异步的（要先认领编辑权），被拒绝时把高亮退回上一篇
-      const result = h.onOpenFile(path)
-      if (result && typeof (result as Promise<boolean>).then === 'function') {
-        void (result as Promise<boolean>).then((ok) => {
-          if (ok === false && selectedPath === path) { selectedPath = previous; render() }
-        })
-      } else if (result === false) {
-        selectedPath = previous
-        render()
-      }
+      // 打开是异步的（要先认领编辑权），被拒绝时 openWithFallback 负责退回高亮
+      openWithFallback(path)
     }
   })
 
@@ -291,7 +300,9 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
         else expanded.add(path)
         render()
       } else {
-        h.onOpenFile(path)
+        // 与鼠标点行同一条路（含失败回退），不再裸调 onOpenFile ——
+        // 被别的窗口占用时乐观高亮没人退回去（E4）
+        openWithFallback(path)
       }
       return
     }
@@ -304,10 +315,16 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
 
   container.addEventListener('contextmenu', (e) => {
     e.preventDefault()
-    // 文件 / 目录的菜单已改由行尾「⋮」按钮触发；右键只保留空白处的根目录菜单
-    // （新建文件 / 新建文件夹 / 在文件夹中打开）。
+    // 重命名输入框上右键：不打断输入，什么都不弹
     const rowEl = (e.target as HTMLElement).closest<HTMLElement>('.tree-row')
-    if (!rowEl) h.onContext('root', '', e.clientX, e.clientY)
+    if (rowEl?.querySelector('input.tree-rename')) return
+    // 右键行 = 行尾 ⋮ 按钮的同一组菜单（E2，文件先选中再弹，行为对齐按钮路径）；
+    // 空白处 / 路径已失效的行才是根目录菜单（新建 / 在文件夹中打开）
+    const node = rowEl ? find(data, rowEl.dataset.path!) : null
+    if (!node) { h.onContext('root', '', e.clientX, e.clientY); return }
+    focusPath = node.path
+    if (node.type === 'file') { selectedPath = node.path; render() }
+    h.onContext(node.type, node.path, e.clientX, e.clientY)
   })
 
   function find(nodes: TreeNode[], path: string): TreeNode | null {

@@ -167,6 +167,11 @@ export interface Api {
   initialFile(): Promise<string | null>
   /** 取走上一次退出时保存失败的原因（没有则为 null） */
   takeSaveError(): Promise<string | null>
+  /**
+   * 单文件 / 独立窗口模式：让主进程监听当前文档所在目录（fs:changed 由此而来）。
+   * 工作空间模式不用调 —— 根目录已有递归监听（D4）。
+   */
+  watchFile(p: string): Promise<boolean>
   resizeWindow(mode: 'welcome' | 'workspace'): Promise<boolean>
   onFsChanged(cb: () => void): () => void
   /** 主题是应用级设置，别的窗口改了主题时收到广播（只更新界面，不再回传） */

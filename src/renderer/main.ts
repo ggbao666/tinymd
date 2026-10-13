@@ -402,8 +402,16 @@ async function openFile(path: string): Promise<boolean> {
       if (st && state.openPath === path) lastSavedMtime = st.mtimeMs
     })
     void localizeRemoteImages(editorCtl.remoteImageSources())
+    // 单文件模式 / 独立窗口没有工作空间 watcher：让主进程转而监听这一篇所在的目录，
+    // 外部修改检测（A4）于是在所有窗口形态下都能工作（D4）。切换文档时会自动换目标。
+    if (!state.root) void window.api.watchFile(path)
     return true
   } catch (e) {
+    // 读失败且已被更新的请求超越时**不要动归属**（D1）：新请求自己会管它的认领，
+    // 这里若照旧把归属「还给」屏幕上的旧文档，会把新请求刚认领的目标释放掉 ——
+    // 新文档变成无人认领，另一个窗口就能再开它，两个窗口各自 0.6s 自动保存
+    // 互相覆盖，正是归属表要防的那件事
+    if (seq !== openSeq) return false
     // 没读进来就把归属还给上一篇：上面的认领已经把它让出去了，
     // 不还回来现在屏幕上这一篇就成了「无人认领」，别的窗口能再打开它
     if (state.openPath) void window.api.claimDocument(state.openPath)
@@ -867,6 +875,9 @@ document.addEventListener('keydown', (event) => {
     // 设置面板开着时只关设置：它在最上层，而这里和设置那个监听都挂在 document 上、
     // 先注册的先跑 —— 不主动让位的话一次 Esc 会把目录和设置一起收掉（B5）
     if (!els.settingsBackdrop.classList.contains('hidden')) return
+    // 链接浮层开着时只关浮层（E6，让位法同上）：浮层输入框自己的 Esc 监听
+    // 和这个 document 监听会一起触发，不让位的话一次 Esc 把浮层和目录一起收掉
+    if (!els.linkPopover.classList.contains('hidden')) return
     if (tocOpen) setTocOpen(false)
     return
   }
@@ -1370,7 +1381,13 @@ $('#link-remove').addEventListener('click', () => {
 $('#link-cancel').addEventListener('click', closeLinkPopover)
 els.linkInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('#link-apply').click()
-  if (e.key === 'Escape') closeLinkPopover()
+  if (e.key === 'Escape') {
+    // 这个 Esc 只关浮层，必须拦下冒泡（E6）：document 上目录的 Esc 监听跑在冒泡段、
+    // 晚于本监听 —— 不拦的话它执行时浮层已被关掉、让位判据失效，一次 Esc 会把
+    // 浮层和目录一起收掉（B5 的让位法对「目标阶段先关掉自己」的场景不适用）
+    e.stopPropagation()
+    closeLinkPopover()
+  }
 })
 
 // ---------- sidebar / misc buttons ----------
@@ -1535,7 +1552,9 @@ async function exportCurrent(format: ExportFormat) {
 
 window.api.onMenu(async (action) => {
   switch (action) {
-    case 'open-folder': await chooseAndOpen(); break
+    // 独立窗口没有工作空间概念：在这里执行 openWorkspace 会把 state.root 设上、
+    // 侧栏却被 body.standalone 永久隐藏，得到一个「看不见文件树的工作区」错位状态（E1）
+    case 'open-folder': if (!STANDALONE) await chooseAndOpen(); break
     case 'new-file': if (state.root) await createEntry(state.root, 'file'); break
     case 'save': await doSave(); break
     // 独立窗口没有工作空间可关；它也没有欢迎页可回（见 style.css 的 body.standalone）
@@ -1561,8 +1580,8 @@ let fsTimer: number | undefined
 window.api.onFsChanged(() => {
   clearTimeout(fsTimer)
   fsTimer = window.setTimeout(async () => {
-    if (!state.root) return
-    await refreshTree()
+    // 目录模式刷新文件树；单文件 / 独立窗口没有树，跳过刷新、只做下面这份文件的比对（D4）
+    if (state.root) await refreshTree()
     if (!state.openPath) return
     // 磁盘上的这份文件被别的程序改过了吗（A4）？拿打开 / 上次保存时记下的 mtime 比一眼。
     // 自己刚保存的那次不会误报 —— doSave 里已经把 lastSavedMtime 更新成保存后的值了。
@@ -1608,7 +1627,10 @@ window.addEventListener('drop', (e) => {
     .map((f) => window.api.pathForFile(f) || '')
     .find((p) => MD_RE.test(p))
   if (target) {
-    void openSingleFile(target)
+    // 拖进来的文件就在当前工作空间里时走普通打开，保住侧栏和文件树（E3）；
+    // 空间外的才切单文件模式 —— 否则拖一篇空间内的文档也会把整个工作空间切掉
+    if (state.root && isPathOrInside(target, state.root)) void openFile(target)
+    else void openSingleFile(target)
     return
   }
   // 图片由编辑区的 handleDrop 处理；其余类型明确告知不支持

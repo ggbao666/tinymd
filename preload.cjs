@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   tree: (root) => ipcRenderer.invoke('fs:tree', root),
   read: (p) => ipcRenderer.invoke('fs:read', p),
   stat: (p) => ipcRenderer.invoke('fs:stat', p),
+  watchFile: (p) => ipcRenderer.invoke('fs:watchFile', p),
   write: (p, content) => ipcRenderer.invoke('fs:write', p, content),
   flush: (p, content) => ipcRenderer.sendSync('fs:flush', { p, content }),
   create: (parent, base, type) => ipcRenderer.invoke('fs:create', parent, base, type),

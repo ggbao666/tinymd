@@ -1223,7 +1223,9 @@ body.toc-open #editor-empty { margin-right: 246px; }
   opacity: 0.45;
 }
 
-/* 表格 */
+/* 表格。Tiptap 把表格包在 .tableWrapper 里：宽表格在这里横向滚动，
+   不再被 #editor-wrap 的 overflow-x: hidden 裁得看不全也滚不动（E7） */
+.ProseMirror .tableWrapper { overflow-x: auto; }
 .ProseMirror table {
   border-collapse: collapse;
   margin: 1em 0;
@@ -1369,6 +1371,12 @@ body.toc-open #editor-empty { margin-right: 246px; }
 }
 /* 目录展开时正文让出 246px，浮层要跟着让位 —— 否则它会压在目录面板上（B6） */
 body.toc-open #link-popover { right: calc(16px + 246px); }
+/* 窄窗口里（尤其目录展开把右缘让出去后）不溢出（E5）：浮层总宽封顶，
+   收缩只落在输入框上、按钮保持原尺寸。⚠️ 目录展开时右缘让出 246px，
+   上限也要跟着少 246px —— 只封 100vw 的话浮层仍会从左缘溢出 */
+#link-popover { max-width: calc(100vw - 48px); }
+body.toc-open #link-popover { max-width: calc(100vw - 246px - 48px); }
+#link-popover button { flex: none; }
 #link-input {
   width: 260px;
   font: inherit;
@@ -1379,6 +1387,7 @@ body.toc-open #link-popover { right: calc(16px + 246px); }
   border-radius: 7px;
   padding: 6px 10px;
   outline: none;
+  min-width: 0; /* 配合 #link-popover 的 max-width：允许被压缩（E5） */
 }
 #link-input:focus { border-color: var(--accent); }
 
