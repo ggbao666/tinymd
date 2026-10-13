@@ -1130,6 +1130,32 @@ body.toc-open #editor-empty { margin-right: 246px; }
 /* 悬停提示：未指定语言按纯文本处理；用灰色而非强调色，安静不抢眼 */
 .ProseMirror pre:hover::after { content: '纯文本'; color: var(--text-2); }
 .ProseMirror pre[data-language]:hover::after { content: attr(data-language); color: var(--text-2); }
+/* 代码块右下角的复制按钮：应用自己的悬浮 DOM（不在 .ProseMirror 里，导出不会带上），
+   悬停在代码块上时出现。右上角被语言角标的命中区占着（editor.ts 按 130×26 判定），
+   所以放右下。z-index 压过代码块、让过气泡菜单(250)。 */
+#code-copy {
+  position: fixed;
+  z-index: 240;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 7px;
+  background: var(--bg-sidebar);
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.92;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+#code-copy:hover { color: var(--text); border-color: var(--hairline-strong); background: var(--active); }
+#code-copy svg { width: 14px; height: 14px; }
+#code-copy .ic-check { display: none; color: var(--accent); }
+#code-copy.copied .ic-copy { display: none; }
+#code-copy.copied .ic-check { display: block; }
+#code-copy.hidden { display: none; }
 .ProseMirror pre code {
   color: inherit;
   background: none;
@@ -1214,10 +1240,26 @@ body.toc-open #editor-empty { margin-right: 246px; }
 }
 .ProseMirror ul[data-type='taskList'] li > div { flex: 1; min-width: 0; }
 .ProseMirror ul[data-type='taskList'] input[type='checkbox'] {
+  /* 自绘（原生的蓝方块和整套灰调不搭）：圆角小方块，勾选时填充主题色 */
+  appearance: none;
+  -webkit-appearance: none;
   width: 15px;
   height: 15px;
-  accent-color: var(--accent);
+  margin: 0;
+  border: 1.5px solid var(--hairline-strong);
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.ProseMirror ul[data-type='taskList'] input[type='checkbox']:hover {
+  border-color: var(--accent);
+}
+.ProseMirror ul[data-type='taskList'] input[type='checkbox']:checked {
+  border-color: var(--accent);
+  background: var(--accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3.2 8.6 3.4 3.4 6.2-7.4'/%3E%3C/svg%3E")
+    center / 10px no-repeat;
 }
 .ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div {
   opacity: 0.45;

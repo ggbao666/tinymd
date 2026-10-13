@@ -606,6 +606,7 @@ function setEditorMode(mode: EditorMode) {
   if (mode === 'source') {
     els.sourceEditor.value = state.dirty ? editorCtl.getMarkdown() : lastSaved
     state.dirty = els.sourceEditor.value !== lastSaved
+    hideCodeCopy() // 富文本里的代码块没了，悬浮按钮跟着藏
   } else {
     const markdown = els.sourceEditor.value
     // 纯文本是切回后的唯一数据源，整篇重新解析，避免两种编辑状态不一致。
@@ -1388,6 +1389,78 @@ els.linkInput.addEventListener('keydown', (e) => {
     e.stopPropagation()
     closeLinkPopover()
   }
+})
+
+// ---------- 代码块复制按钮（悬浮在代码块右下角，悬停出现） ----------
+
+// 按钮是**应用自己的 DOM**（挂在 body 上、position:fixed），不进 ProseMirror 文档 ——
+// 塞进 pre 里会被 PM 当作文档内容清掉；导出走离线渲染、天生不带这个按钮。
+// 位置放右下角：右上角被语言角标的 130×26 命中区占着（见 editor.ts 的角标点击判断）。
+const codeCopyBtn = document.createElement('button')
+codeCopyBtn.id = 'code-copy'
+codeCopyBtn.className = 'hidden'
+codeCopyBtn.title = '复制代码'
+codeCopyBtn.setAttribute('aria-label', '复制代码')
+codeCopyBtn.innerHTML =
+  '<svg class="ic-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>' +
+  '<svg class="ic-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3.2 8.6 3.4 3.4 6.2-7.4"/></svg>'
+document.body.append(codeCopyBtn)
+
+let codeCopyTarget: HTMLElement | null = null
+let codeCopyTimer: number | undefined
+
+function hideCodeCopy() {
+  codeCopyTarget = null
+  codeCopyBtn.classList.add('hidden')
+  codeCopyBtn.classList.remove('copied')
+}
+
+/** 贴到 pre 的右下角（内缩 10px）；代码块底部滚出视口时按钮收进来，可见部分太小就藏 */
+function placeCodeCopy(pre: HTMLElement) {
+  const r = pre.getBoundingClientRect()
+  const BTN = 28, INSET = 10
+  const top = Math.min(r.bottom - INSET - BTN, window.innerHeight - INSET - BTN)
+  if (top < r.top + INSET || r.right - r.left < BTN * 3) { hideCodeCopy(); return }
+  codeCopyBtn.style.top = `${top}px`
+  codeCopyBtn.style.left = `${r.right - INSET - BTN}px`
+  codeCopyTarget = pre
+  codeCopyBtn.classList.remove('hidden')
+}
+
+els.editor.addEventListener('mouseover', (e) => {
+  const pre = (e.target as HTMLElement).closest('pre')
+  if (pre) placeCodeCopy(pre)
+})
+els.editor.addEventListener('mouseout', (e) => {
+  const from = (e.target as HTMLElement).closest?.('pre')
+  if (!from || from !== codeCopyTarget) return
+  const to = e.relatedTarget as HTMLElement | null
+  if (!to || !to.closest || to.closest('pre') !== from) hideCodeCopy()
+})
+// 滚动时跟随目标代码块；目标滚没了自然会被 placeCodeCopy 藏掉
+els.editorWrap.addEventListener('scroll', () => { if (codeCopyTarget) placeCodeCopy(codeCopyTarget) }, { capture: false })
+
+codeCopyBtn.addEventListener('mousedown', (e) => e.preventDefault()) // 不抢编辑器焦点，免得气泡菜单闪没
+codeCopyBtn.addEventListener('click', () => {
+  if (!codeCopyTarget) return
+  const text = codeCopyTarget.textContent || ''
+  const done = () => {
+    codeCopyBtn.classList.add('copied')
+    codeCopyBtn.title = '已复制'
+    clearTimeout(codeCopyTimer)
+    codeCopyTimer = window.setTimeout(() => { codeCopyBtn.classList.remove('copied'); codeCopyBtn.title = '复制代码' }, 1200)
+  }
+  void navigator.clipboard.writeText(text).then(done).catch(() => {
+    // 兜底：clipboard API 不可用时走老办法
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.append(ta)
+    ta.select()
+    try { document.execCommand('copy'); done() } catch { /* 放弃 */ }
+    ta.remove()
+  })
 })
 
 // ---------- sidebar / misc buttons ----------
