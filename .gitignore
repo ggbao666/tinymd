@@ -49,6 +49,7 @@ build/_verify_fixes.stage.json
 build/_verify_find.json
 build/_verify_find.stage.json
 build/_verify_find_dump.txt
+build/_find_nav_debug.txt
 build/_shots/
 build/export-preview.*
 build/_ci_monitor.cjs

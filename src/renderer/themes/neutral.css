@@ -21,9 +21,9 @@ html.theme-neutral {
   /* ==高亮== 底色：深色下用半透明暖黄，白字仍可读 */
   --mark-bg: rgba(255, 214, 10, 0.28);
   /* 查找命中高亮：与 ==高亮== 同色系但更亮，当前命中再往橙推一档，一眼能分出「在哪一条」 */
-  --find-hit-bg: rgba(255, 214, 10, 0.30);
-  --find-hit-bg-current: rgba(255, 170, 0, 0.55);
-  --find-hit-ring: rgba(255, 214, 10, 0.40);
+  --find-hit-bg: rgba(167, 139, 250, 0.30);
+  --find-hit-bg-current: rgba(139, 109, 245, 0.60);
+  --find-hit-ring: rgba(167, 139, 250, 0.40);
   /* 语法高亮：GitHub Dark 官方色板 */
   --syn-keyword: #ff7b72;
   --syn-string: #a5d6ff;

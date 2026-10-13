@@ -1537,9 +1537,47 @@ function gotoIndex(i: number) {
   if (!findHits.length) return
   findIndex = ((i % findHits.length) + findHits.length) % findHits.length
   const r = findHits[findIndex]
-  if (editorMode === 'source') els.sourceEditor.setSelectionRange(r.from, r.to)
-  else editorCtl.revealRange(r.from, r.to)
+  // 先画高亮（is-current 换到新下标）再滚动：revealRange 的 rAF 里要按
+  // .find-hit.is-current 的 DOM 位置算滚动目标，顺序反了会定位到旧的那条
   paintFind()
+  if (editorMode === 'source') {
+    const ta = els.sourceEditor
+    ta.setSelectionRange(r.from, r.to)
+    scrollTextareaTo(ta, r.from)
+  } else {
+    editorCtl.revealRange(r.from, r.to)
+  }
+}
+
+/**
+ * 把 textarea 里的某个字符偏移滚进视野。
+ * ⚠️ 不能指望浏览器：实测 setSelectionRange / focus() / blur+focus 都不会让
+ * #source-editor 滚动（光标在几十屏外也纹丝不动），只能镜像测量自己算 ——
+ * 复制字体 / 行高 / 内边距 / 软换行规则，量「选区之前文本」的总高。
+ */
+function scrollTextareaTo(ta: HTMLTextAreaElement, offset: number) {
+  const cs = getComputedStyle(ta)
+  const mirror = document.createElement('div')
+  for (const k of ['font', 'lineHeight', 'padding', 'border', 'boxSizing', 'letterSpacing', 'tabSize'] as const) {
+    ;(mirror.style as unknown as Record<string, string>)[k] = (cs as unknown as Record<string, string>)[k]
+  }
+  Object.assign(mirror.style, {
+    position: 'absolute',
+    visibility: 'hidden',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    width: `${ta.clientWidth}px`,
+  })
+  mirror.textContent = ta.value.slice(0, offset)
+  document.body.appendChild(mirror)
+  const y = mirror.scrollHeight
+  mirror.remove()
+  // 视野内不动（连续命中同屏时不抖）；出了视野就滚到「命中位于视口上三分之一」处
+  const lh = parseFloat(cs.lineHeight) || 24
+  const top = ta.scrollTop
+  if (y < top + lh || y > top + ta.clientHeight - lh * 2) {
+    ta.scrollTop = Math.max(0, y - ta.clientHeight / 3)
+  }
 }
 
 /** 定位到光标所在的（或之后的第一个）命中；回车继续往下走 */

@@ -647,10 +647,28 @@ export function createEditor(host: HTMLElement, cb: EditorCallbacks) {
     /** 把某一段滚进视野并选中（查找条上下翻用）。⚠️ 不带 focus()，否则抢走查找框的光标 */
     revealRange(from: number, to: number) {
       try {
-        const tr = editor.state.tr
-          .setSelection(TextSelection.create(editor.state.doc, from, to))
-          .scrollIntoView()
+        const tr = editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to))
         editor.view.dispatch(tr)
+        // ⚠️ 不能用 tr.scrollIntoView()：它在这个布局里不让 #editor-wrap 滚（实测 scrollTop
+        // 恒为 0，命中在几十屏外也不动）。大纲定位 revealPos 早就为同一个问题绕开了它 ——
+        // 同样自己算：把命中滚到编辑区偏上 96px。rAF 等装饰 DOM（.find-hit.is-current）落位。
+        requestAnimationFrame(() => {
+          try {
+            const dom = editor.view.domAtPos(from)
+            const node = dom.node.nodeType === 1 ? (dom.node as Element) : dom.node.parentElement
+            const el = (node?.closest('.find-hit.is-current') || node) as Element | null
+            const wrap = editor.view.dom.closest('#editor-wrap') as HTMLElement | null
+            if (el && wrap) {
+              // 已在视野内就别滚（连续命中同屏时每点一次都强制挪到偏上位置会抖）
+              const box = el.getBoundingClientRect()
+              const wbox = wrap.getBoundingClientRect()
+              if (box.top < wbox.top + 48 || box.bottom > wbox.bottom - 48) {
+                const target = box.top - wbox.top + wrap.scrollTop - 96
+                wrap.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+              }
+            }
+          } catch { /* 位置可能已失效 */ }
+        })
       } catch { /* 位置可能已失效 */ }
     },
     /** 当前光标 / 选区起点 */

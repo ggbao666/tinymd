@@ -1380,7 +1380,8 @@ body.toc-open #editor-empty { margin-right: 246px; }
 /* 无结果：输入框描边转警示色，比只改计数文字更容易被注意到 */
 #find-input.no-hit,
 #find-input.no-hit:focus { border-color: var(--danger); }
-/* 命中高亮：所有命中共用暖黄底，当前命中加重一圈 */
+/* 命中高亮：紫色系 —— 不能用黄（==高亮== 的 mark 是黄的，撞色），也别用 accent 蓝
+   （当前命中的描边是蓝的，底色再蓝就分不清「当前」和「普通」） */
 .ProseMirror .find-hit {
   background: var(--find-hit-bg);
   border-radius: 3px;

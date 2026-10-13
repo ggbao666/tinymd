@@ -30,9 +30,9 @@ html.theme-light {
   /* ==高亮== 底色：浅色下就是常规荧光笔黄 */
   --mark-bg: rgba(255, 214, 10, 0.55);
   /* 查找命中高亮：亮底上要比 ==高亮== 再实一点、往橙推，才能压住正文 */
-  --find-hit-bg: rgba(255, 193, 7, 0.62);
-  --find-hit-bg-current: rgba(255, 146, 0, 0.72);
-  --find-hit-ring: rgba(180, 130, 0, 0.35);
+  --find-hit-bg: rgba(124, 58, 237, 0.18);
+  --find-hit-bg-current: rgba(109, 40, 217, 0.36);
+  --find-hit-ring: rgba(124, 58, 237, 0.45);
 
   /* 语法高亮：GitHub Light 官方色板 */
   --syn-keyword: #cf222e;
