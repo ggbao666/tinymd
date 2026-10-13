@@ -2,7 +2,7 @@
    ① 往标题粘贴带 <mark> 的 h1 → 事务层剥掉（粘贴是真实用户路径，走 PM paste 处理）
    ② 往正文粘贴 <mark> → 保留（对照组）
    ③ 预置「# 标题 ==高亮==」文档打开：mark 在 JSON/DOM 里但视觉无背景（CSS 保险），编辑后剥离
-   ④ 截图：mark 2px 圆角 + 标题无高亮 + 跨行 mark */
+   ④ 截图：mark 4px 圆角（slice：首行左缘/末行右缘圆角，断行处直角）+ 标题无高亮 + 跨行 mark */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
   fs.mkdirSync(WS, { recursive: true })
   fs.writeFileSync(path.join(WS, 'mark.md'), [
     '# 一级标题', '',
-    '正文里有 ==黄色高亮==，还有一段很长很长很长很长很长很长很长很长很长很长的高亮 ==延续== 到下一行占位占位占位。', '',
+    '正文里有 ==黄色高亮==，还有一段 ==很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长的跨行高亮，折行处应是直角、首行左缘和末行右缘才是圆角== 落到下一行占位占位。', '',
     '## 二级标题', '',
     '再来一段 ==高亮== 收尾。',
   ].join('\n'))
@@ -103,12 +103,15 @@ app.whenReady().then(async () => {
   })()`)
   rec('正文粘贴 mark 保留（对照）', check2.lastText === '真人', check2)
 
-  // ③ mark 圆角实测
+  // ③ mark 圆角实测 + 切片模式（slice：圆角只在首行左缘/末行右缘，断行处直角）
   const radius = await js(W, `(() => {
     const m = document.querySelector('.ProseMirror p mark')
-    return m ? getComputedStyle(m).borderRadius : null
+    if (!m) return null
+    const cs = getComputedStyle(m)
+    return { radius: cs.borderRadius, bdb: cs.boxDecorationBreak || cs.webkitBoxDecorationBreak }
   })()`)
-  rec('mark 圆角 = 2px', radius === '2px', radius)
+  rec('mark 圆角 = 4px 且 box-decoration-break = slice',
+    !!radius && radius.radius === '4px' && (radius.bdb === 'slice' || radius.bdb === undefined), radius)
 
   await js(W, `(() => { const s = window.getSelection(); s.removeAllRanges(); return 1 })()`)
   await sleep(300)

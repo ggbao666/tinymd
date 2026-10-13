@@ -1057,18 +1057,19 @@ body.toc-open #editor-empty { margin-right: 246px; }
   padding: 0.15em 0.4em;
 }
 
-/* ==高亮== 渲染成 <mark>。小圆角（2px）是折中：大圆角配 clone（换行每行各自
-   补内边距）会把跨行高亮碎成一串独立胶囊，2px 时碎片感很轻，单行（绝大多数
-   情况）则与查找命中、行内代码视觉统一。
+/* ==高亮== 渲染成 <mark>。slice（切片，默认值）模式下整块高亮按「未被折断的盒子」画：
+   圆角只出现在真正的起点（首行左缘）和终点（末行右缘），中间被折断的边是直角；
+   左右内边距也只在首/末段出现，断行处背景直接贴住文字（原生选区的观感）。
+   早先用 clone（每行各自补圆角+内边距），大圆角会把跨行高亮碎成一串胶囊，被迫压到 2px；
+   换 slice 后不再有碎片问题，圆角回到与行内代码同族的 4px。
    代码块的 8px 不同 —— 那是编辑器自己画的容器，见 .ProseMirror pre。 */
 .ProseMirror mark {
   background: var(--mark-bg);
   color: inherit;
   padding: 0.06em 0.15em;
-  border-radius: 2px;
-  /* 跨行时每行都补上左右内边距，否则换行后的那截会贴着文字 */
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+  border-radius: 4px;
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
 }
 
 /* 高亮不作用于标题（视觉保险）：事务层 StripHeadingHighlight 只在编辑时剥 mark，
