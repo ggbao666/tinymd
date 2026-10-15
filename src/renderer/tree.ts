@@ -53,17 +53,57 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
   function setData(nodes: TreeNode[]) {
     // 新建文件会触发 fs.watch → 树刷新，若此时重命名输入框在编辑中，重建 DOM 会把它冲掉
     if (renamePath) { pendingData = nodes; return }
+    // ⚠️ 懒加载的 children 要按路径**搬到新树上**。不搬的话：用户展开的几个目录会在
+    // 每次 fs:changed（自动保存就会触发）之后集体退回「载入中」，展开状态看着像失效了。
+    // 主进程只给一层，搬不搬是我们自己说了算 —— 搬过来的就是「已经读过」，
+    // 所以展开时不会再去读一次。
+    if (data.length) {
+      const old = new Map<string, TreeNode[]>()
+      collect(data, old)
+      const carry = (list: TreeNode[]) => {
+        for (const n of list) {
+          const prev = old.get(n.path)
+          if (n.type === 'dir' && prev) n.children = prev
+          if (n.children) carry(n.children)
+        }
+      }
+      carry(nodes)
+    }
     data = nodes
     render()
   }
+
+  /** 把树里所有已加载的目录 children 收进 map（路径 -> 子级） */
+  function collect(nodes: TreeNode[], out: Map<string, TreeNode[]>) {
+    for (const n of nodes) {
+      if (n.type === 'dir' && n.children) {
+        out.set(n.path, n.children)
+        collect(n.children, out)
+      }
+    }
+  }
   function flushPendingData() {
     if (!pendingData) return false
-    data = pendingData
+    // 走 setData 同一条路，才能把懒加载的 children 搬过来
+    const nodes = pendingData
     pendingData = null
+    setData(nodes)
     return true
   }
   function select(path: string) { selectedPath = path; if (!renamePath) render() }
-  function ensureExpanded(path: string) { if (!expanded.has(path)) { expanded.add(path); if (!renamePath) render() } }
+  /**
+   * 确保某个目录是展开的（新建文件 / 新建文件夹之后用，main.ts 的 createEntry 调）。
+   * 懒加载下**不能只加标记** —— 那样目录会停在「载入中」直到用户手动点开，
+   * 而新建的东西就在里面，用户当然希望直接看见。所以这里顺带把子级读出来。
+   */
+  function ensureExpanded(path: string) {
+    const node = find(data, path)
+    if (!expanded.has(path)) {
+      expanded.add(path)
+      if (node && !node.children) { render(); void loadChildren(node); return }
+    }
+    if (!renamePath) render()
+  }
   function clear() { data = []; pendingData = null; selectedPath = ''; renamePath = null; renameDraft = null; focusPath = null; expanded.clear(); render() }
 
   /** 让指定行进入重命名态（文件/文件夹均可），输入框聚焦并全选 */
@@ -79,6 +119,10 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
   /**
    * 在树里定位某一行（面包屑的文件夹部分点击用，C8）：展开它的所有祖先目录、
    * 选中并滚动到可见处。路径不在树里（被删了 / 还没刷新）时返回 false。
+   *
+   * ⚠️ 懒加载下 `children` 只有展开过的目录才有，所以这里只能找到**已加载**的行。
+   * 这够用：面包屑点的是「当前打开着的这篇的所在目录」—— 它是用户自己从文件树点进来的，
+   * 那一行必然已经展开可见。跨工作空间的路径本来就找不到（那不是同一个工作空间）。
    */
   function reveal(path: string): boolean {
     // 自底向上收集「从根到目标」整条链上的目录，找到才算数
@@ -118,6 +162,44 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     render()
   }
 
+  /**
+   * 展开 / 折叠一个目录（鼠标点击与键盘 Enter 共用这一条路）。
+   *
+   * **懒加载**：目录节点的 children 不在数据里（主进程只读一层），
+   * 第一次展开时才通过 `loadChildren` 读那一层，读完挂到节点上。
+   * 折叠再展开时children 已在节点上，**不重复读**。
+   *
+   * 读的过程中先摆一行「载入中…」占位，免得用户以为点了没反应。
+   * 失败（无权限 / 目录被删）就把这一层记成已加载的空数组，不再无限重试。
+   */
+  function toggleDir(node: TreeNode) {
+    const path = node.path
+    // ⚠️ 判断「读过没有」要问**数据树里那个节点**，而不是传进来的 node（可能是旧树的引用）
+    const live = find(data, path) || node
+    if (expanded.has(path)) {
+      expanded.delete(path)
+      render()
+      return
+    }
+    expanded.add(path)
+    if (live.children) { render(); return }   // 已读过 → 直接渲染，不重复读盘
+    render()                                  // 没读过 → 先摆「载入中」占位
+    void loadChildren(live)
+  }
+
+  async function loadChildren(node: TreeNode) {
+    let kids: TreeNode[] = []
+    try { kids = (await window.api.children(node.path)) as TreeNode[] } catch { kids = [] }
+    // ⚠️ 结果必须挂到**数据树里那个节点**上，不能只挂到传进来的 node。
+    // 读盘期间 fs:changed 可能触发 setData 换掉整棵树（对象全换了），那时 node
+    // 已经是旧树的引用 —— 挂错地方的表现是「读完、render 也调了，DOM 却始终停在
+    // 载入中」，而且只有折叠再展开才恢复（那时走的是 node.children 已存在的快路径）。
+    const live = find(data, node.path) || node
+    live.children = kids
+    if (!expanded.has(node.path)) return   // 读的过程中用户又折叠了，别改 UI
+    render()
+  }
+
   function render() {
     // 重建 DOM 会丢焦点：之前还攥着焦点的话，重建之后按 focusPath 还回去
     const hadFocus = container.contains(document.activeElement)
@@ -126,7 +208,11 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     const walk = (nodes: TreeNode[], depth: number) => {
       for (const n of nodes) {
         frag.append(row(n, depth))
-        if (n.type === 'dir' && expanded.has(n.path) && n.children?.length) walk(n.children, depth + 1)
+        if (n.type === 'dir' && expanded.has(n.path)) {
+          if (n.children) walk(n.children, depth + 1)
+          // 懒加载的「读盘中」占位：读完了会被 loadChildren 里的 render() 顶掉
+          else frag.append(loadingRow(depth + 1))
+        }
       }
     }
     walk(data, 0)
@@ -141,6 +227,15 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       const back = [...container.querySelectorAll<HTMLElement>('.tree-row')].find((el) => el.dataset.path === focusPath)
       back?.focus()
     }
+  }
+
+  /** 懒加载的占位行：目录已展开、子级还在读 */
+  function loadingRow(depth: number): HTMLElement {
+    const el = document.createElement('div')
+    el.className = 'tree-loading'
+    el.style.setProperty('--depth', String(depth))
+    el.textContent = '载入中…'
+    return el
   }
 
   function row(n: TreeNode, depth: number): HTMLElement {
@@ -256,9 +351,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
     if (!node) return
     focusPath = path
     if (node.type === 'dir') {
-      if (expanded.has(path)) expanded.delete(path)
-      else expanded.add(path)
-      render()
+      toggleDir(node)
     } else {
       // 打开是异步的（要先认领编辑权），被拒绝时 openWithFallback 负责退回高亮
       openWithFallback(path)
@@ -296,9 +389,7 @@ export function createTree(container: HTMLElement, h: TreeHandlers) {
       e.preventDefault()
       focusPath = path
       if (node.type === 'dir') {
-        if (expanded.has(path)) expanded.delete(path)
-        else expanded.add(path)
-        render()
+        toggleDir(node)
       } else {
         // 与鼠标点行同一条路（含失败回退），不再裸调 onOpenFile ——
         // 被别的窗口占用时乐观高亮没人退回去（E4）

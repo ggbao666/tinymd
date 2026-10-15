@@ -2,10 +2,6 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, shell, protocol, nativeTheme,
 const path = require('path')
 const fs = require('fs')
 const fsp = fs.promises
-// 导出 Word 的映射器（ProseMirror 文档模型 → docx）。
-// 单独一个文件：它是一套「把 style.css 的数值翻译成 Word 排版元素」的翻译表，
-// 塞进 main.js 会把这边的窗口/菜单逻辑淹掉。⚠️ 记得同步 electron-builder.yml 的 files。
-const { buildDocx } = require('./docx-export.cjs')
 
 const isDev = !app.isPackaged
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || ''
@@ -35,11 +31,11 @@ const windowInitialFile = new Map()
 // ⚠️ 最小宽度也跟着分两套：工作区 600、欢迎页 460（欢迎页本身只有 480 宽，拿 600
 // 去卡它连创建都别扭）。两者在 ui:resize 里随尺寸一起切换 —— 换尺寸前必须先松最小宽度，
 // 否则从工作区退回欢迎页会被 600 卡住、窗口缩不到 480。
-// 面板互不互斥**不归这里管**：渲染层那条 PANELS_EXCLUSIVE_W(800) 说的是
-// 「窗口窄到 800 以下，左右两块面板只能开一块」，跟「窗口能被拖到多窄」是两件事。
-// ⚠️ WORKSPACE_W 是「侧栏 264 + 编辑区 + 目录 246」一起住的那个宽度：
-// 1000 时两块同开，正文可用 = 1000 - 264 - 246 - 滚动条 10 = 480，正好抵在渲染层的
-// EDITOR_MIN(480) 上（侧栏一分都不用让）；窗口再窄一点，侧栏才开始让出宽度。
+// ⚠️ 面板互不互斥**不归这里管**：目录（大纲）已经并进左侧栏、成了侧栏的一页，
+// 不再是右侧那块独立面板 —— 整屏只有「左栏 + 正文」两栏，不存在两块面板抢空间，
+// 所以渲染层那条 PANELS_EXCLUSIVE_W(800) 判据已随之删除，别再拿它算账。
+// WORKSPACE_W = 1000 是「侧栏 264 + 正文 + 滚动条」一起住的宽度：
+// 侧栏全开时正文可用 = 1000 - 264 - 滚动条 10 - 左右内边距 = 696px。
 // （历史上是 1020 → 1180 → 1200 → 1000，这次按用户要求收窄到 1000。）
 const WELCOME_W = 480
 const WELCOME_MIN_W = 460
@@ -165,18 +161,23 @@ function noteSaveError(message) {
   try { fs.writeFileSync(saveErrorFile(), String(message).slice(0, 500)) } catch { /* 连错误都记不下就算了 */ }
 }
 
-async function listTree(dir, depth) {
+/**
+ * 列出某一层的内容（**不递归**）。
+ *
+ * 只收 `.md` 系后缀的文件与目录：点开头的条目、`.git` / `node_modules` 这类直接跳过。
+ * 目录节点**不带 children** —— 子级由 `fs:children` 在用户展开时才读（懒加载）。
+ *早先这里是 `depth >= 12` 的全量递归：几万文件的仓库点一次「打开文件夹」就把
+ * 整棵树读进内存，现在按需读，展开一个目录才付一次 readdir 的代价。
+ */
+async function listTree(dir) {
   let entries
   try { entries = await fsp.readdir(dir, { withFileTypes: true }) } catch { return [] }
   const out = []
   for (const ent of entries) {
     if (ent.name.startsWith('.') || IGNORED.has(ent.name)) continue
     const full = path.join(dir, ent.name)
-    if (ent.isDirectory()) {
-      out.push({ name: ent.name, path: full, type: 'dir', children: depth >= 12 ? [] : await listTree(full, depth + 1) })
-    } else if (ent.isFile() && MD_RE.test(ent.name)) {
-      out.push({ name: ent.name, path: full, type: 'file' })
-    }
+    if (ent.isDirectory()) out.push({ name: ent.name, path: full, type: 'dir' })
+    else if (ent.isFile() && MD_RE.test(ent.name)) out.push({ name: ent.name, path: full, type: 'file' })
   }
   out.sort((a, b) => (a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name, 'zh-Hans-CN')))
   return out
@@ -312,18 +313,14 @@ function attachEditorWindow(w, initialFile) {
     w.setMenuBarVisibility(false)
   }
   w.once('ready-to-show', () => w.show())
-  // 菜单是应用级的（全局唯一），聚焦窗口变了就要按它的状态重算导出项可用性
-  w.on('focus', refreshExportMenu)
   w.on('closed', () => {
     editorWindows.delete(w)
     windowInitialFile.delete(wcId)
-    exportEnabled.delete(wcId)
     // 它登记过的单文件目录监听一起收掉（D4）
     const fw = fileWatchers.get(wcId)
     if (fw) { try { fw.close() } catch { /* ignore */ } fileWatchers.delete(wcId) }
     // 窗口没了，它占着的文档要放出来，否则那篇从此谁都打不开
     releaseDocument(w)
-    refreshExportMenu()
   })
 
   // Chromium 会把 file:// 页面的缩放级别持久化（误触 Ctrl+滚轮 / Ctrl+= 后重启依旧放大）。
@@ -352,41 +349,6 @@ function createWindow() {
 }
 
 /**
- * 独立窗口：只编辑一个 Markdown，不带工作空间侧栏。
- * 与主窗口**共用同一套页面和样式**，差异只有启动参数 `?mode=standalone`
- * （渲染层据此加 body.standalone），所以不存在第二套 UI 要维护。
- * 目标文件在这里就登记进 allowedFiles / allowedRoots，窗口一打开就能读它和它的图片。
- */
-function createStandaloneWindow(file) {
-  const target = allowFile(file)
-  if (!target) return 'invalid'
-
-  // 这篇已经在别的窗口（主窗口或另一个独立窗口）里开着就别开了，
-  // 把那个窗口抬到前面 —— 两处编辑同一篇必然互相覆盖
-  const existing = ownerOf(target)
-  if (existing) { focusWindow(existing); return 'focus' }
-
-  const w = attachEditorWindow(new BrowserWindow(editorWindowOptions({
-    width: WORKSPACE_W,
-    height: WORKSPACE_H,
-    minWidth: WORKSPACE_MIN_W,
-    title: path.basename(target).replace(MD_RE, ''),
-  })), target)
-
-  // 先替它占上：从这里到渲染层认领之间还有几百毫秒（建窗口 + 加载页面 + 读文件），
-  // 中间如果没有归属，另一个窗口能趁这个空隙打开同一篇。
-  // 渲染层启动后会用同一路径再认领一次（归属是它自己，直接通过）。
-  documentOwners.set(docKey(target), w)
-
-  if (DEV_URL) {
-    const url = new URL(DEV_URL)
-    url.searchParams.set('mode', 'standalone')
-    w.loadURL(url.toString())
-  } else {
-    w.loadFile(path.join(__dirname, 'dist/renderer/index.html'), { query: { mode: 'standalone' } })
-  }
-  return 'opened'
-}
 
 function imageStorageDirectory(documentPath, storage) {
   assertInside(documentPath)
@@ -490,18 +452,6 @@ function broadcast(channel, ...args) {
 }
 
 // 导出菜单项是应用级的（菜单全局唯一），可用性只能取「当前聚焦窗口」的判定：
-// 主窗口和独立窗口可能开着不同的文档，不能都往同一个菜单项上写。
-const exportEnabled = new Map() // webContents.id -> 是否可导出
-function refreshExportMenu() {
-  const focused = BrowserWindow.getFocusedWindow()
-  const target = focused && exportEnabled.has(focused.webContents.id) ? focused : win
-  const enabled = !!(target && !target.isDestroyed() && exportEnabled.get(target.webContents.id))
-  for (const id of ['export-pdf', 'export-docx']) {
-    const item = Menu.getApplicationMenu()?.getMenuItemById(id)
-    if (item) item.enabled = enabled
-  }
-}
-
 function buildMenu() {
   const template = [
     {
@@ -522,10 +472,6 @@ function buildMenu() {
         { label: '打开文件夹…', accelerator: 'CmdOrCtrl+O', click: () => send('menu', 'open-folder') },
         { label: '新建文件', accelerator: 'CmdOrCtrl+N', click: () => send('menu', 'new-file') },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('menu', 'save') },
-        // 初始置灰：没有打开文档时导出没有意义。可用性由渲染层经 ui:exportState 同步
-        // （只要打开了文档就可导出，与编辑模式无关 —— 渲染走的是离线渲染，不读编辑器 DOM）
-        { id: 'export-pdf', label: '导出为 PDF…', accelerator: 'CmdOrCtrl+P', enabled: false, click: () => send('menu', 'export-pdf') },
-        { id: 'export-docx', label: '导出为 Word…', accelerator: 'CmdOrCtrl+Shift+P', enabled: false, click: () => send('menu', 'export-docx') },
         { type: 'separator' },
         { label: '插入链接…', accelerator: 'CmdOrCtrl+K', click: () => send('menu', 'link') },
         { label: '关闭工作空间', accelerator: 'CmdOrCtrl+Shift+W', click: () => send('menu', 'close-workspace') },
@@ -549,6 +495,9 @@ function buildMenu() {
       label: '显示',
       submenu: [
         { label: '切换边栏', accelerator: 'CmdOrCtrl+\\', click: () => send('menu', 'toggle-sidebar') },
+        // 目录是侧栏的一页（与文件树互斥），这一项是「切到那一页」而不是「开合面板」。
+        // ⚠️ 独立窗口 / 单文件模式里侧栏只有大纲这一页，切页就是收合它 —— 行为一致。
+        { label: '切换到文档大纲', accelerator: 'CmdOrCtrl+Shift+O', click: () => send('menu', 'toggle-outline') },
         { type: 'separator' },
         { role: 'resetZoom', label: '实际大小' },
         { role: 'zoomIn', label: '放大' },
@@ -602,7 +551,11 @@ function registerIpc() {
   })
 
   ipcMain.handle('workspace:setRoot', (_e, root) => { setWorkspaceRoot(root); return true })
-  ipcMain.handle('fs:tree', (_e, root) => listTree(root, 0))
+  ipcMain.handle('fs:tree', (_e, root) => listTree(root))
+  // 懒加载：用户展开某个目录时才读它那一层。⚠️ 必须走 assertReadable ——
+  // 否则渲染层可以把任意路径发过来当成工作空间目录读出内容（openWorkspace 的
+  // 越界校验拦不住这里，那条路只覆盖「用户选了哪个文件夹」）。
+  ipcMain.handle('fs:children', (_e, dir) => listTree(assertReadable(dir)))
   // 渲染层拿到的是拖拽/双击等来源的路径，交回主进程登记为可读写文件
   ipcMain.handle('workspace:allowFile', (_e, p) => !!allowFile(p))
 
@@ -752,96 +705,6 @@ function registerIpc() {
     return writeImage(downloadedImageName(mime), data, documentPath, storage)
   })
 
-  // 导出 PDF：在隐藏窗口里重放一份「纯文档」页面再打印。直接对编辑器窗口调用
-  // printToPDF 不行——编辑区是 overflow:auto 的滚动容器，分页会被切坏。
-  //
-  // 串行化：同时发起两次 printToPDF 时 Chromium 会直接报 "Printing failed"。
-  // 保存对话框关掉后打印还要约一秒，这期间窗口已能再次响应（右键再导一次），
-  // 所以用一条队列把真正的打印串起来，后一次等前一次结束再跑。
-  let exportQueue = Promise.resolve()
-  ipcMain.handle('export:pdf', (e, payload) => {
-    const parent = dialogParent(e)
-    const run = exportQueue.then(() => printPdf(payload, parent), () => printPdf(payload, parent))
-    exportQueue = run.then(() => {}, () => {})
-    return run
-  })
-
-  async function printPdf({ html, css, name }, parent) {
-    const r = await dialog.showSaveDialog(parent, {
-      title: '导出为 PDF',
-      defaultPath: `${String(name || 'document')}.pdf`,
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    })
-    // ⚠️ 保存对话框返回的是 filePath（单数，取消时为 ''），
-    // 不是上面 showOpenDialog 那种 filePaths 数组。
-    if (r.canceled || !r.filePath) return null
-
-    const printer = new BrowserWindow({
-      show: false,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
-    })
-    try {
-      // 从 about:blank 起步：页面里没有任何应用外壳，只有下面注入的文档内容与样式
-      await printer.loadURL('about:blank')
-      await printer.webContents.executeJavaScript(`(() => {
-        document.documentElement.className = 'theme-light'
-        const style = document.createElement('style')
-        style.textContent = ${JSON.stringify(String(css || ''))}
-        document.head.appendChild(style)
-        const root = document.createElement('div')
-        root.className = 'ProseMirror'
-        root.innerHTML = ${JSON.stringify(String(html || ''))}
-        document.body.appendChild(root)
-        return Promise.all([
-          document.fonts.ready,
-          ...[...document.images].map((img) => img.decode().catch(() => {})),
-        ])
-      })()`)
-      const pdf = await printer.webContents.printToPDF({
-        pageSize: 'A4',
-        // 必须开：否则代码块底色、==高亮==、表头底色会被打印样式一并剥离
-        printBackground: true,
-        margins: { top: 0.7, bottom: 0.7, left: 0.71, right: 0.71 }, // 单位英寸
-        displayHeaderFooter: true,
-        headerTemplate: '<div></div>',
-        // 页眉页脚模板不继承页面样式，字号/颜色/字体都得内联写死
-        footerTemplate: '<div style="width:100%;font-size:9px;text-align:center;color:#a5a5ac;font-family:sans-serif">'
-          + '<span class="pageNumber"></span> / <span class="totalPages"></span></div>',
-      })
-      await fsp.writeFile(r.filePath, pdf)
-      return r.filePath
-    } finally {
-      if (!printer.isDestroyed()) printer.destroy()
-    }
-  }
-
-  // 导出 Word：渲染层给的是**文档模型**（editor.getJSON()）与目标文档所在目录，
-  // 图片相对路径按那个目录解析 —— 所以导出任意一篇都不需要切换当前文档。
-  // 与 PDF 不同，这里没有隐藏窗口，全程在 Node 里组装，不需要排队。
-  ipcMain.handle('export:docx', async (e, { doc, baseDir, name }) => {
-    const r = await dialog.showSaveDialog(dialogParent(e), {
-      title: '导出为 Word',
-      defaultPath: `${String(name || 'document')}.docx`,
-      filters: [{ name: 'Word 文档', extensions: ['docx'] }],
-    })
-    // 与上面一样：保存对话框返回的是 filePath（单数）
-    if (r.canceled || !r.filePath) return null
-    const { buffer, skippedImages } = await buildDocx(doc, path.resolve(String(baseDir || '')), {
-      title: String(name || 'document'),
-      // 图片必须落在已授权目录内（与 app-file:// 同一套判定）；越界或读不到的按「跳过」计数
-      allowPath: (abs) => [...allowedRoots].some((root) => insideRoot(root, abs)),
-    })
-    await fsp.writeFile(r.filePath, buffer)
-    return { path: r.filePath, skipped: skippedImages }
-  })
-
-  // 导出菜单项的可用性：由渲染层按「是否打开了文档」同步（与编辑模式无关）。
-  // 按窗口分别记录，菜单项上显示的是当前聚焦窗口的判定（见 refreshExportMenu）。
-  ipcMain.handle('ui:exportState', (e, enabled) => {
-    exportEnabled.set(e.sender.id, !!enabled)
-    refreshExportMenu()
-    return true
-  })
 
   ipcMain.handle('ui:openExternal', (_e, url) => {
     if (/^https?:\/\//i.test(url)) return shell.openExternal(url)
@@ -867,7 +730,6 @@ function registerIpc() {
   // 文件树右键「在新窗口中打开」：独立窗口只编辑这一篇，不带工作空间侧栏。
   // 返回值让渲染层能把话说准：'opened' 开了新窗口，'focus' 这篇已经在某个窗口里
   // （已把它抬到前面，没有再开），'invalid' 路径不合法或文件不存在。
-  ipcMain.handle('window:standalone', (_e, p) => createStandaloneWindow(p))
 
   // 文档归属：渲染层每次切换文档前先认领（claim），被别的窗口占着就原地不动；
   // 关闭工作空间 / 文档被删时释放（release）；右键菜单先查归属（owner），
@@ -882,12 +744,6 @@ function registerIpc() {
     const w = BrowserWindow.fromWebContents(e.sender)
     if (w) releaseDocument(w)
     return true
-  })
-
-  ipcMain.handle('doc:owner', (e, p) => {
-    const w = BrowserWindow.fromWebContents(e.sender)
-    const owner = ownerOf(p)
-    return { self: !!owner && owner === w, other: !!owner && owner !== w }
   })
 
   // 重命名 / 删除前的占用查询，**含子孙路径**：改一个目录的名、或把目录移到废纸篓时，

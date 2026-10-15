@@ -1,24 +1,16 @@
 import './style.css'
 // 导出 PDF 时把样式以字符串形式交给主进程，在隐藏窗口里原样复现编辑器的排版。
 // 与上面的副作用导入指向同一个文件、只是查询串不同，两者互不冲突。
-import editorCss from './style.css?inline'
-import printCss from './print.css?inline'
-import { createEditor, markdownToDoc, markdownToHtml, type EditorCtl } from './editor'
-import type { JSONContent } from '@tiptap/core'
+import { createEditor, type EditorCtl } from './editor'
 import { createTree } from './tree'
 import { showContextMenu } from './contextmenu'
 import { openImageViewer } from './imageviewer'
 import { findRangesInText, nextMatchIndex } from './find'
-import { basename, dirname, encodeMarkdownPath, imageFileName, relativeFrom, resolveRel, type ImageStorageMode, type ImageStorageSettings, type PopupItem } from './util'
+import { basename, dirname, encodeMarkdownPath, imageFileName, relativeFrom, resolveRel, samePath, type ImageStorageMode, type ImageStorageSettings, type PopupItem } from './util'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
 const MD_RE = /\.(md|markdown|mdown|mkd)$/i
-
-// 独立窗口（文件树右键「在新窗口中打开」）：与主窗口**共用同一套页面**，
-// 只有启动参数不同 —— 它只编辑一个文件，不要工作空间侧栏。
-// 形态差异统一用 body.standalone 表达，样式在 style.css 里，逻辑在这里分流。
-const STANDALONE = new URLSearchParams(location.search).get('mode') === 'standalone'
 
 const els = {
   welcome: $('#view-welcome'),
@@ -28,9 +20,11 @@ const els = {
   workspace: $('#view-workspace'),
   topbar: $('#topbar'),
   btnSidebar: $('#btn-sidebar'),
-  btnToc: $('#btn-toc') as HTMLButtonElement,
-  tocFloat: $('#toc-float'),
-  tocList: $('#toc-float-list'),
+  btnOpenFolderWs: $('#btn-open-folder-ws'),
+  btnOpenFileWs: $('#btn-open-file-ws'),
+  outline: $('#outline'),
+  tabFiles: $('#tab-files') as HTMLButtonElement,
+  tabOutline: $('#tab-outline') as HTMLButtonElement,
   breadcrumb: $('#breadcrumb'),
   status: $('#status'),
   sidebar: $('#sidebar'),
@@ -44,7 +38,6 @@ const els = {
   sourceEditor: $('#source-editor') as HTMLTextAreaElement,
   sourceModeButton: $('#btn-source-mode') as HTMLButtonElement,
   count: $('#count'),
-  statusPill: $('#status-pill'),
   linkPopover: $('#link-popover'),
   linkInput: $('#link-input') as HTMLInputElement,
   fileInput: $('#file-input') as HTMLInputElement,
@@ -59,14 +52,14 @@ if (window.api.platform === 'darwin') document.body.classList.add('mac')
 if (window.api.platform === 'win32') document.body.classList.add('win')
 
 /**
- * 右侧留白的滚动条补偿。
+ * 实测经典滚动条的宽度（Windows 10px、macOS overlay 0px）。
  *
- * 正文的左右内边距是同一个数（--content-pad），但 #editor-wrap 的滚动条会贴着
- * 窗口右缘再占掉一条（Windows 经典滚动条 10px、macOS overlay 滚动条 0px），
- * 于是右边看起来总比左边宽一点。这里实测一次滚动条宽度交给 CSS，
- * 由 CSS 从右侧内边距里扣掉它 —— 屏幕上的左右留白就对等了。
+ * ⚠️ 它**不再**写进 CSS（`--sb-w` 随「扣滚动条凑视觉对称」那套算法一起删了 ——
+ * 正文左右现在都是完整的 `--content-pad`，滚动条槽在 padding 之外，两侧天然对称）。
+ * 现在只剩一个用途：`sidebarMaxWidth()` 给侧栏宽度算上限时要扣掉它，
+ * 口径是「正文真正能用到的宽度」—— 不扣的话屏幕上会莫名其妙少 10px。
  *
- * ⚠️ 必须同步执行（模块求值时立刻跑）：晚一步会先按 0 画一帧，正文横向抖一下。
+ * ⚠️ 必须同步执行（模块求值时立刻跑）：晚一步会先按 0 算一遍侧栏上限。
  * ⚠️ 用离屏探针而不是直接量 #editor-wrap —— 没打开文件时它是 display:none，
  * offsetWidth / clientWidth 都是 0，量出来永远是 0。
  */
@@ -78,25 +71,15 @@ function syncScrollbarWidth() {
   document.body.appendChild(probe)
   const width = probe.offsetWidth - probe.clientWidth
   probe.remove()
-  document.documentElement.style.setProperty('--sb-w', `${width}px`)
   scrollbarWidth = width
 }
 syncScrollbarWidth()
-
-if (STANDALONE) {
-  document.body.classList.add('standalone')
-  // 独立窗口一定带着目标文件启动，直接进工作区视图，省掉欢迎页闪一下
-  els.welcome.classList.add('hidden')
-  els.workspace.classList.remove('hidden')
-}
 
 const state = {
   root: null as string | null,
   openPath: null as string | null,
   dirty: false,
 }
-// 单文件模式：通过「打开文件」/拖拽/双击打开单个 md，只看大纲，不显示文件树
-let fileMode = false
 type EditorMode = 'visual' | 'source'
 let editorMode: EditorMode = 'visual'
 let lastSaved = ''
@@ -243,7 +226,8 @@ function isPathOrInside(openPath: string, target: string): boolean {
 // ---------- tree ----------
 
 const treeCtl = createTree(els.tree, {
-  onOpenFile(p) { return openFile(p) },
+  // 用户在树上点了某一篇 —— 这一次要跟着高亮那一行
+  onOpenFile(p) { selectInTree = true; return openFile(p) },
   onContext(kind, path, x, y) { void showTreeMenu(kind, path, x, y) },
   onNewFile(dir) { void createEntry(dir, 'file') },
   onRename(oldPath, newName) { void doRename(oldPath, newName) },
@@ -281,17 +265,17 @@ function flashWelcomeToast(text: string, isError = false, duration = 2600) {
 }
 
 function setStatus(text: string, isError = false, duration = 2400) {
-  // 保存状态（已保存 / 编辑中…）常驻在左侧；其余为临时提示，2.4s 后回落到保存状态
+  // 保存状态（已保存 / 编辑中…）常驻在中段；其余为临时提示，2.4s 后回落到保存状态。
+  // ⚠️ 状态栏（#statusbar）现在常驻整窗一条，不再有「整条栏随提示显隐」的机制
+  //    —— 早期版本会hidden 掉 #status-pill，那时这里要 remove('hidden')。
   if (text === '已保存' || text === '编辑中…' || text.startsWith('已保存')) {
     persistentStatus = text
     clearTimeout(statusTimer)
-    els.statusPill.classList.remove('hidden')
     els.status.textContent = text
     els.status.classList.remove('error')
     return
   }
   flashWelcomeToast(text, isError, duration)
-  els.statusPill.classList.remove('hidden')
   els.status.textContent = text
   els.status.classList.toggle('error', isError)
   clearTimeout(statusTimer)
@@ -366,6 +350,13 @@ window.addEventListener('beforeunload', () => {
  * 「先释放再登记」的原子操作，不存在半路松手的瞬间）。
  */
 let openSeq = 0
+/**
+ * 这一次打开要不要在文件树上高亮那一行。只有**从文件树点进来**才是 true；
+ * 「打开文件…」、拖拽、双击、命令行这些「用户没在树上指路」的入口是 false
+ * —— 树可能整个闭合着（打开动作不替他展开），凭空高亮会让人以为已经展开了。
+ * 一次性标志：openFile 里用掉即清。
+ */
+let selectInTree = false
 let openTarget = ''
 async function openFile(path: string): Promise<boolean> {
   if (path === state.openPath) return true
@@ -400,7 +391,12 @@ async function openFile(path: string): Promise<boolean> {
     lastSaved = md
     state.dirty = false
     externalChange = false
-    treeCtl.select(path)
+    // 从文件树点开 → 高亮那一行（这是「树跟着正文走」，一直如此）。
+    // 但**用「打开文件…」/ 拖拽 / 双击进来的**不要高亮：用户没在树上指路，
+    // 而树此时可能整个是闭合的（打开动作不替他展开，见 openSingleFile），
+    // 凭空多一个高亮反而让人以为树已经展开了。
+    if (selectInTree) treeCtl.select(path)
+    selectInTree = false
     showEditor()
     updateBreadcrumb()
     updateCount()
@@ -430,65 +426,73 @@ async function openFile(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * 打开一个工作空间。
+ *
+ * ⚠️ **同一个文件夹不重复打开**：早先这里无条件往下走，于是「再打开一次当前这个文件夹」
+ * 会重新 setRoot + 重拉文件树 + `showEditorEmpty()` —— **正在编辑的那一篇被清空**、
+ * 树里的展开状态与滚动位置一起归零。选同一个文件夹时用户没有切换意图，
+ * 原地不动才是对的。要切换请直接点文件树里的另一篇。
+ *
+ * 判据用 `samePath` 而不是字符串相等：Windows 上同一个目录经不同途径拿到的大小写 /
+ * 分隔符可能不一样（`C:\a` 与 `c:/a`），直接比较会判成两个文件夹。
+ */
 async function openWorkspace(root: string, selectFile?: string) {
+  if (samePath(root, state.root)) {
+    // 已经在开着这个文件夹了。若这一轮还指定了文件（右键菜单「在文件夹中打开」等
+    // 入口可能这么调），那就只切那一篇；否则原地不动，什么都不改。
+    if (selectFile) {
+      if (!await openFile(selectFile)) showEditorEmpty()
+    }
+    return
+  }
   await flushSave()
   await window.api.setRoot(root)
   state.root = root
-  // 从单文件模式切回目录模式：把文件树（和整个侧栏）恢复出来
-  fileMode = false
+  treeCtl.setData(await window.api.tree(root))
   document.body.classList.remove('file-mode')
   treeCtl.setData(await window.api.tree(root))
+  setSidePane(sidePane === 'outline' ? 'outline' : 'files')
   els.wsPath.textContent = root
   els.wsPath.title = root
   els.welcome.classList.add('hidden')
   els.workspace.classList.remove('hidden')
-  if (!STANDALONE) void window.api.resizeWindow('workspace')
+  void window.api.resizeWindow('workspace')
   addRecent(root)
   // 打开不了（比如那一篇正在别的窗口里）就退回空文档，而不是继续显示上一个工作空间的文档
   if (selectFile) { if (!await openFile(selectFile)) showEditorEmpty() }
   else showEditorEmpty()
 }
 
-// 单文件打开（打开文件 / 拖拽 / 双击 md / 右键打开）：
-// 不把所在文件夹当工作空间，整个侧栏收起 —— 形态与独立窗口一致，只有正文和右侧的目录。
+/**
+ * 打开单个文件（打开文件 / 拖拽 / 双击 md / 右键打开 / 命令行）。
+ *
+ * **没有「单文件模式」了**（2026-10-14）：打开一个文件就等于**把它的父目录当成工作空间**。
+ * 于是每个窗口都是「左栏文件树 + 正文」两栏，不再有第三种形态要维护。
+ *
+ * ⚠️ 文件树保持**默认闭合、不选中那一篇**（用户明确要的）：正文已经换成这一篇了，
+ * 树里不额外替他展开一条路径 —— 「默认闭合」这条规矩在任何入口都不破例。
+ * 展开状态与选中是用户自己在树上的操作，不该被打开动作替他做。
+ */
 async function openSingleFile(path: string) {
-  await flushSave()
-  // 单文件模式没有工作空间，先把它登记为主进程可读写的文件，否则 fs:read / fs:write 会被拒绝
+  // 正在开着这一篇：无操作（不重开、不切形态）
+  if (samePath(path, state.openPath)) return
+  // 先登记成主进程可读写的文件：父目录还没成为工作空间时，fs:read 会被权限拦下
   if (!await window.api.allowFile(path)) {
     setStatus('无法打开该文件：文件不存在或不是 Markdown', true)
     return
   }
-  // 已在别的窗口打开就到此为止：**不要**先切模式再打开 —— 那样被拒后会留下
-  // 「侧栏已经变单文件模式、编辑器里却还是上一篇」的错位状态。
-  if (!(await window.api.claimDocument(path)).ok) {
-    setStatus(`「${basename(path)}」已在另一个窗口中打开`, true)
-    return
-  }
-  state.root = null
-  fileMode = true
-  document.body.classList.add('file-mode')
-  treeCtl.clear()
-  els.welcome.classList.add('hidden')
-  els.workspace.classList.remove('hidden')
-  // 单文件模式整个侧栏收起 → 那 264px 直接还给编辑区（窗口尺寸不变，
-  // 工作区与单文件模式共用同一套窗口尺寸）
-  if (!STANDALONE) void window.api.resizeWindow('workspace')
-  // 与目录模式一致：底部路径条显示的是目录路径，不是文件路径
-  const dir = dirname(path)
-  els.wsPath.textContent = dir
-  els.wsPath.title = dir
   addRecent(path, 'file')
-  await openFile(path)
+  // 以父目录为工作空间。若那已经是当前工作空间，openWorkspace 内部会短路成
+  // 「只切这一篇」，既不重拉树也不动展开状态。
+  await openWorkspace(dirname(path), path)
 }
 
 async function closeWorkspace() {
   await flushSave()
-  // 回欢迎页先把目录收掉：欢迎页没有编辑区，留着没有意义。
-  // （窗口尺寸的账主进程在 ui:resize 里先抹平了，这里不必操心先后）
-  setTocOpen(false)
+  // 回欢迎页：把侧栏恢复成「文件」页（欢迎页没有工作空间，大纲那页没内容可看）
+  setSidePane('files')
   state.root = null
-  fileMode = false
-  document.body.classList.remove('file-mode')
   state.openPath = null
   void window.api.releaseDocument()
   state.dirty = false
@@ -496,11 +500,10 @@ async function closeWorkspace() {
   treeCtl.clear()
   els.workspace.classList.add('hidden')
   els.welcome.classList.remove('hidden')
-  if (!STANDALONE) void window.api.resizeWindow('welcome')
+  void window.api.resizeWindow('welcome')
   // 面包屑与标题一起清掉（updateBreadcrumb 顺带驱动 updateTitle）
   updateBreadcrumb()
   renderRecents()
-  syncExportAvailability()
 }
 
 function showEditor() {
@@ -508,9 +511,8 @@ function showEditor() {
   els.editorWrap.classList.toggle('hidden', editorMode !== 'visual')
   els.sourceWrap.classList.toggle('hidden', editorMode !== 'source')
   updateEditorModeButton()
-  // refreshToc 内部会先过一遍 syncTocButton（按钮可用性跟着大纲走）
+  // refreshToc 内部会先过一遍 syncOutlineTab（大纲标签的可用性跟着大纲走）
   refreshToc()
-  syncExportAvailability()
 }
 
 function showEditorEmpty() {
@@ -527,11 +529,9 @@ function showEditorEmpty() {
   els.count.textContent = ''
   updateEditorModeButton()
   els.editorEmpty.classList.remove('hidden')
-  syncTocButton()
   refreshToc()
   // 面包屑与标题一并清空（updateBreadcrumb 顺带驱动 updateTitle）
   updateBreadcrumb()
-  syncExportAvailability()
 }
 
 // 单文件模式下没有挂工作空间（state.root 为 null），但文件所在目录是已知的。
@@ -550,8 +550,7 @@ function updateTitle() {
   const file = state.openPath ? basename(state.openPath) : ''
   const root = displayRoot() ? basename(displayRoot()) : ''
   const dirty = state.dirty ? '*' : ''
-  if (STANDALONE) document.title = file ? `${dirty}${file} — tinymd` : 'tinymd'
-  else document.title = file ? `${dirty}${file} — ${root}` : (root || 'tinymd')
+  document.title = file ? `${dirty}${file} — ${root}` : (root || 'tinymd')
 }
 
 function updateBreadcrumb() {
@@ -619,7 +618,6 @@ function setEditorMode(mode: EditorMode) {
     // 拿它当切换依据，会在自动保存还没落盘时把刚做的替换整体覆盖回旧文本（丢数据）。
     els.sourceEditor.value = editorCtl.getMarkdown()
     state.dirty = els.sourceEditor.value !== lastSaved
-    hideCodeCopy() // 富文本里的代码块没了，悬浮按钮跟着藏
     closeFind() // 换了一套编辑区，查找结果（文档坐标）已经对不上号了
   } else {
     const markdown = els.sourceEditor.value
@@ -665,7 +663,7 @@ els.sourceEditor.addEventListener('keydown', (event) => {
 // ---------- 文档目录（右侧那块固定区域用的数据层） ----------
 
 let outlineTimer: number | undefined
-/** 文档改动后延迟刷新。目录关着就不必重渲染 —— 展开时 setTocOpen 会渲染一次 */
+/** 文档改动后延迟刷新。不在大纲页就不必重渲染 —— 切过去时会渲染一次 */
 function scheduleOutline() {
   clearTimeout(outlineTimer)
   outlineTimer = window.setTimeout(refreshToc, 250)
@@ -690,59 +688,48 @@ function outlineRows(items: { level: number; text: string; pos: number }[], onPi
   return frag
 }
 
-/** 换了文档 / 改了内容后同步目录内容（关着就不用管，展开时会渲染） */
+/** 换了文档 / 改了内容后同步目录内容（不在大纲页就不必重渲染） */
 function refreshToc() {
-  // 标题可能刚被删光 / 新加上：按钮可用性跟着大纲走（B4）
-  syncTocButton()
-  if (tocOpen) renderToc()
+  // 标题可能刚被删光 / 新加上：大纲标签的可用性跟着大纲走
+  syncOutlineTab()
+  if (sidePane === 'outline') renderToc()
 }
 
-// ---------- 两侧面板：向内收，给编辑区留底线 ----------
+// ---------- 侧栏：文件树 / 大纲两页互斥 ----------
 //
-// 侧栏（左）与目录（右）都**从编辑区里切空间**，窗口尺寸一动不动。
+// 大纲原先是编辑区右侧一块浮层面板（#toc-float），与左侧栏各占一边、正文被夹在中间。
+// 现在它搬进侧栏，和文件树**同栏同页互斥**：整屏只剩「左栏 + 正文」两栏。
 //
-// 早先那套「面板往外长、窗口跟着伸缩」的做法已经废弃，原因是它有个消不掉的时序问题：
-// 窗口几何只能**瞬时**变（setBounds 没有动画可放），而侧栏宽度是带动画的，两者必然错帧 ——
-// 收起时窗口先跳到窄尺寸、侧栏还要 180ms 才缩完，正文被挤窄再弹回；展开时窗口先长出去、
-// 侧栏才慢慢长出来，正文先撑宽再收回来（「先把编辑区拓展过去，把文件区显示出来，
-// 把编辑区缩回去」）。窗口不动就没有这一类问题：面板收放退化成一次普通的页内重排，
-// 动画想怎么做就怎么做。
+// ⭐ 状态必须用**单一枚举**而不是再加一个布尔。早先的 tocOpen / no-sidebar 是两个
+// 独立开关，能组合出「文件树开着 + 大纲也开着」这种非法态；现在只有一个
+// sidePane，'files' 与 'outline' 天然互斥，不存在同时为真的可能。
 //
-// **谁跟谁冲突，由窗口宽度一条线说了算**（`PANELS_EXCLUSIVE_W`）：
-//   窗口 < 800 → 左右两块互斥：开一块就把另一块收起来，点哪块留哪块
-//     （窄窗口里两块一起摊开，正文剩不下多少，不如只留刚点的那块）
-//   窗口 ≥ 800 → 两块可以同时开着；正文被挤窄那是用户自己的选择，不拦
-//
-// 编辑区那条底线 EDITOR_MIN 于是只剩一个职责：给**侧栏宽度**定上限
-// （拖宽时挡住、空间不够时把它夹窄），跟「能不能同时开」不再是同一件事。
-// ⚠️ 改 style.css 里侧栏 / 目录的宽度时，下面几个常量要一起改。
+// 面板不再与正文抢空间 → 窗口尺寸完全不参与面板开合：
+//   TOC_PAD / PANELS_EXCLUSIVE_W / panelsExclusive() / EDITOR_MIN 全部随之删掉，
+//   「窗口窄到两块只能留一块」那套判据也没有了 —— 因为压根没有第二块面板。
+// 侧栏宽度与目录开合彻底解耦，applySidebarWidth 只在换文档 / 改窗口 / 拖拽时跑。
+
+type SidePane = 'files' | 'outline'
+
+const SIDE_PANE_KEY = 'jianmo.sidebarPane'
+// 用户上次选的那页，跨会话记住（默认「文件」）
+let sidePane: SidePane = localStorage.getItem(SIDE_PANE_KEY) === 'outline' ? 'outline' : 'files'
+
+/** 侧栏有没有被收起来（no-sidebar 与形态无关，收起时正文拿到完整宽度） */
+function paneVisible(): boolean {
+  return !document.body.classList.contains('no-sidebar')
+}
 
 const SIDEBAR_W = 264   // 与 style.css 里 `#sidebar { width: 264px }` 一致
 const SIDEBAR_MIN = 180 // 侧栏拖拽下限（与 style.css / 拖拽处一致）
 const SIDEBAR_MAX = 520 // 侧栏拖拽上限
 const SIDEBAR_W_KEY = 'jianmo.sidebarWidth'  // 拖过的宽度记在这儿
-const TOC_PAD = 246     // 与 style.css 里 `body.toc-open … margin-right: 246px` 一致
 
 /**
- * 左右两块面板互斥的窗口宽度线：窄于它时只能开一块。
- * ⚠️ 别看错对象：main.js 的 `WORKSPACE_MIN_W = 600` 说的是「窗口能被拖到多窄」，
- * 这条 800 说的是「窄到多少开始要互相让路」—— 两件事，没有先后关系。
- * 800 对应的画面是「两块同开时正文还剩 800 − 264 − 246 − 滚动条 10 = 280」。
- */
-const PANELS_EXCLUSIVE_W = 800
-
-/**
- * 编辑区保底宽度 —— 如今只用来给**侧栏宽度**定上限（拖拽 + 夹取两处），
- * 不再是「两块面板能不能同时开」的判据（那件事归 PANELS_EXCLUSIVE_W 管）。
- * 口径是「正文**真正能用到的**宽度」，所以算账时要一起扣掉滚动条
- * （`sidebarMaxWidth` 里减了 `scrollbarWidth`）—— 不扣的话屏幕上会莫名其妙少 10px。
- *
- * 于是存在「两块同开、但侧栏得让一让」的状态：默认窗口 1000 下两块同开正好抵在
- * 264（= 1000 − 246 − 10 − 480），侧栏不用让；窗口再窄一点、或用户把侧栏拖得更宽，
- * 就得让。让的只是**渲染宽度**（`applySidebarWidth`），用户拖出来的偏好宽度记在
- * `sidebarPref` 里，空间回来了会自动还给他。
- * ⚠️ 窗口本身的最小宽度是 main.js 的 `WORKSPACE_MIN_W = 600`，所以极窄窗口下
- * 「正文 ≥ 480」是够不着的（面板已经收无可收，不是漏判）。
+ * 编辑区保底宽度 —— 如今只用来给**侧栏宽度**定上限（拖宽时挡住、空间不够时夹窄）。
+ * 口径是「正文**真正能用到的**宽度」，算账时要一起扣掉滚动条（见 sidebarMaxWidth）。
+ * ⚠️ 早先它还兼着「两块面板能不能同时开」的判据（PANELS_EXCLUSIVE_W），那个职责
+ * 随着目录并进侧栏一起没了 —— 现在侧栏宽度与目录开合彻底解耦。
  */
 const EDITOR_MIN = 480
 
@@ -752,62 +739,33 @@ let sidebarPref = SIDEBAR_W
 const savedSidebarW = Number(localStorage.getItem(SIDEBAR_W_KEY))
 if (savedSidebarW >= SIDEBAR_MIN && savedSidebarW <= SIDEBAR_MAX) sidebarPref = savedSidebarW
 
-/** 这个窗口的宽度里含不含一条侧栏 —— 独立窗口、单文件模式本来就不含 */
-function hasSidebar(): boolean {
-  if (STANDALONE) return false
-  const cls = document.body.classList
-  return !cls.contains('no-sidebar') && !cls.contains('file-mode')
-}
-
-/** 窗口窄到互斥线以下 → 左右两块面板只能开一块 */
-function panelsExclusive(): boolean {
-  return window.innerWidth < PANELS_EXCLUSIVE_W
-}
-
 /** 侧栏宽度的上限：不能让正文被挤到 EDITOR_MIN 以下（拖拽与空间变化两处共用） */
 function sidebarMaxWidth(): number {
-  const limit = window.innerWidth - (tocOpen ? TOC_PAD : 0) - scrollbarWidth - EDITOR_MIN
+  // 口径是「正文**真正能用到的**宽度」，所以算账时要一起扣掉滚动条
+  // （Windows 10px、macOS 0）—— 不扣的话屏幕上会莫名其妙少 10px。
+  const limit = window.innerWidth - scrollbarWidth - EDITOR_MIN
   return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, limit))
 }
 
 /**
  * 侧栏宽度的**唯一出口**：渲染宽度 = 偏好宽度 ∩ 此刻的上限。
  * ⚠️ 夹窄**不写 localStorage** —— 那是空间不够时的临时妥协，不是用户的选择。
- * 早先的写法是把夹取值写回 DOM 并持久化，于是在窄窗口里开一次目录，侧栏就被
- * 永久记住了那个窄值（900 宽下夹到 180，窗口拉回来还是 180）。现在 DOM 只是渲染
- * 结果、偏好另有其处，空间一回来就自动还给他。
  */
 function applySidebarWidth(): void {
   els.sidebar.style.width = `${Math.max(SIDEBAR_MIN, Math.min(sidebarPref, sidebarMaxWidth()))}px`
 }
 
-// 用户把窗口拖窄时重新核对一遍：
-//   ① 拖到互斥线以下 → 两块只能留一块（侧栏是主面板，收起目录）
-//   ② 侧栏自己太宽 → 按新的空间算一遍渲染宽度（空间回来时也会自动还原）
-// ⚠️ ①要判 hasSidebar()：单文件模式、或侧栏本来就收着时，目录没跟谁抢位置，不该被收掉。
+// 用户把窗口拖窄时重新核对一遍：侧栏自己太宽就按新的空间夹一下
+// （空间回来时自动还原，偏好值一直存在 sidebarPref 里）
 window.addEventListener('resize', () => {
   if (els.workspace.classList.contains('hidden')) return
-  if (tocOpen && hasSidebar() && panelsExclusive()) {
-    setTocOpen(false)
-    setStatus('窗口变窄，已收起目录')
-  }
   applySidebarWidth()
 })
 
-
-// ---------- 编辑区右侧的文档目录 ----------
-//
-// 主窗口、单文件模式、独立窗口都一样：标题只在这块区域里看。
-// 只有一个开关：**标题栏上的那个按钮**（Ctrl/Cmd + Shift + O 同效）——
-// 点一下展开、再点一下收起、Esc 也能收起。没有鼠标热区、也没有「钉住」这回事。
-// （按钮以前挂在 #content 上、落在正文右侧那条留白里，现在归顶层按钮组，位置由 CSS 排，
-//  JS 这边只管它的可用性与 active 态。）
-// 展开时目录从右边**摊进编辑区**（正文让出 246px），窗口本身一动不动。
-
-let tocOpen = false
+// ---------- 侧栏的两页：大纲的数据层与渲染 ----------
 
 function renderToc() {
-  els.tocList.replaceChildren(outlineRows(outlineItems(), (pos) => editorCtl.revealPos(pos)))
+  els.outline.replaceChildren(outlineRows(outlineItems(), (pos) => editorCtl.revealPos(pos)))
   syncTocHighlight()
 }
 
@@ -816,7 +774,7 @@ function renderToc() {
  * 大纲条目与 DOM 标题按文档顺序一一对应（getOutline 就是顺序 walk 出来的）。
  */
 function syncTocHighlight() {
-  if (!tocOpen) return
+  if (sidePane !== 'outline') return
   const headings = [...editorCtl.el.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')]
   if (!headings.length) return
   // 64px：标题滚到编辑区上部这么一段算「当前章节」，与 revealPos 的呼吸空间同一量级
@@ -824,13 +782,13 @@ function syncTocHighlight() {
   let active = 0
   headings.forEach((h, i) => { if (h.getBoundingClientRect().top <= line) active = i })
   // 滚到底时最后一段可能整段都在「线」以下（文档尾巴没多少内容）：此时高亮最后一个标题，
-  // 否则用户拖到最底下，目录还指着倒数第二段
+  // 否则用户拖到最底下，大纲还指着倒数第二段
   const wrap = els.editorWrap
   const last = headings[headings.length - 1]
   if (last.getBoundingClientRect().top > line && wrap.scrollHeight - (wrap.scrollTop + wrap.clientHeight) <= 2) {
     active = headings.length - 1
   }
-  els.tocList.querySelectorAll<HTMLElement>('.outline-item').forEach((el, i) => {
+  els.outline.querySelectorAll<HTMLElement>('.outline-item').forEach((el, i) => {
     el.classList.toggle('active', i === active)
   })
 }
@@ -841,68 +799,71 @@ els.editorWrap.addEventListener('scroll', () => {
   tocSpyRaf = requestAnimationFrame(() => { tocSpyRaf = 0; syncTocHighlight() })
 })
 
-function setTocOpen(open: boolean) {
-  if (open === tocOpen) return
-  // 目录是往编辑区里摊开的。窗口已经窄到两块只能留一块时，把侧栏收掉 ——
-  // 刚点的那块优先，另一块让路（用户定的规矩：「打开一个，另一个自动隐藏」）。
-  if (open && hasSidebar() && panelsExclusive()) {
-    document.body.classList.add('no-sidebar')
-    setStatus('窗口较窄，已收起文件栏')
-  }
-  tocOpen = open
-  document.body.classList.toggle('toc-open', open)
-  els.tocFloat.setAttribute('aria-hidden', String(!open))
-  els.btnToc.classList.toggle('active', open)
-  els.btnToc.setAttribute('aria-pressed', String(open))
-  if (open) renderToc()
-  // 目录让出的那份空间会改变侧栏的上限：它收起来时侧栏能更宽，展开时侧栏可能得让一点
+/** 切到某一页。互斥由这个函数独占维护 —— 别在别处直接改 body.side-outline */
+function setSidePane(pane: SidePane) {
+  sidePane = pane
+  localStorage.setItem(SIDE_PANE_KEY, pane)
+  document.body.classList.toggle('side-outline', pane === 'outline')
+  els.tabFiles.classList.toggle('active', pane === 'files')
+  els.tabOutline.classList.toggle('active', pane === 'outline')
+  els.tabFiles.setAttribute('aria-selected', String(pane === 'files'))
+  els.tabOutline.setAttribute('aria-selected', String(pane === 'outline'))
+  if (pane === 'outline') renderToc()
+  // 形态可能变了（单文件 ↔ 目录），宽度上限跟着变
   applySidebarWidth()
 }
 
-function toggleToc() {
-  // 开着的时候随时能关；要开就得有标题 —— 空面板弹出来只会让人以为点坏了
-  if (!tocOpen && !outlineItems().length) {
-    setStatus(editorMode === 'source' ? '纯文本模式下没有目录' : '这篇文档还没有标题')
-    return
-  }
-  setTocOpen(!tocOpen)
-}
-
-/** 目录按钮只在「有一篇文档、不是纯文本模式、且文档有标题」时给用。
-    没有标题时也置灰，并把原因写进 title —— 空面板弹出来只会让人以为点坏了（B4） */
-function syncTocButton() {
+/** 大纲标签的可用性：没有打开文档 / 纯文本模式 / 这篇没标题时置灰，并把原因写进 title。
+    没有标题时**不切走**（正在看大纲页就让它留在那儿，只是空），
+    但从文件页切过来时要拦住并给一句提示 —— 空面板弹出来只会让人以为点坏了（B4） */
+function syncOutlineTab() {
   const hasOutline = outlineItems().length > 0
   const usable = !!state.openPath && editorMode === 'visual' && hasOutline
-  els.btnToc.classList.toggle('hidden', !state.openPath)
-  els.btnToc.disabled = !usable
-  if (!usable && state.openPath && editorMode === 'visual') {
-    els.btnToc.title = '这篇文档还没有标题'
-  } else {
-    els.btnToc.title = '文档目录 (Ctrl/Cmd + Shift + O)'
-  }
-  if (!usable) setTocOpen(false)
+  els.tabOutline.disabled = !usable
+  els.tabOutline.title = !usable
+    ? (editorMode === 'source' ? '纯文本模式下没有大纲' : '这篇文档还没有标题')
+    : '文档大纲 (Ctrl/Cmd + Shift + O)'
+  // 正在看大纲页、却变得没内容了（大标题被删光 / 切纯文本模式）→ 退回文件页
+  if (sidePane === 'outline' && !usable) setSidePane('files')
 }
 
-els.btnToc.addEventListener('click', toggleToc)
+function toggleOutline() {
+  if (sidePane !== 'outline') {
+    // 从文件页切过来：先看有没有得看
+    if (!outlineItems().length) {
+      setStatus(editorMode === 'source' ? '纯文本模式下没有大纲' : '这篇文档还没有标题')
+      return
+    }
+  }
+  setSidePane(sidePane === 'outline' ? 'files' : 'outline')
+}
+
+els.tabFiles.addEventListener('click', () => setSidePane('files'))
+els.tabOutline.addEventListener('click', toggleOutline)
+els.btnOpenFolderWs.addEventListener('click', chooseAndOpen)
+// 顶栏的「打开文件」与欢迎页那个同名按钮走同一条路：选中后切到单文件模式
+// （侧栏只剩大纲那一页），从哪儿进来形态完全一致。
+els.btnOpenFileWs.addEventListener('click', chooseAndOpenFile)
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     // 设置面板开着时只关设置：它在最上层，而这里和设置那个监听都挂在 document 上、
-    // 先注册的先跑 —— 不主动让位的话一次 Esc 会把目录和设置一起收掉（B5）
+    // 先注册的先跑 —— 不主动让位的话一次 Esc 会把两个浮层一起收掉（B5）
     if (!els.settingsBackdrop.classList.contains('hidden')) return
     // 链接浮层开着时只关浮层（E6，让位法同上）：浮层输入框自己的 Esc 监听
-    // 和这个 document 监听会一起触发，不让位的话一次 Esc 把浮层和目录一起收掉
+    // 和这个 document 监听会一起触发，不让位的话一次 Esc 把两个浮层一起收掉
     if (!els.linkPopover.classList.contains('hidden')) return
     // 查找条同上：它在最上层，一次 Esc 只收它（它自己的监听也会 stopPropagation，
     // 这里双保险 —— 焦点不在查找框里时（比如刚点过正文）也能只收查找条）
     if (!findBar.classList.contains('hidden')) { closeFind(); return }
-    if (tocOpen) setTocOpen(false)
+    // ⚠️ 这里**不再**管大纲：它已经是侧栏的一页，不是浮层 —— Esc 不该把它收走，
+    // 想切回文件页点标签或按 Ctrl/Cmd + Shift + O。
     return
   }
   const mod = window.api.platform === 'darwin' ? event.metaKey : event.ctrlKey
   if (mod && event.shiftKey && (event.key === 'o' || event.key === 'O')) {
     event.preventDefault()
-    toggleToc()
+    toggleOutline()
   }
   // 查找 / 替换。⌘/Ctrl + F 与 + H 在 Electron 里没有默认行为（没有菜单项占用），
   // 但仍要 preventDefault —— Windows 上 Ctrl+F 会触发窗口的查找条（如 devtools 未开时不影响），
@@ -1156,17 +1117,8 @@ async function showTreeMenu(kind: 'file' | 'dir' | 'root', path: string, x: numb
   const target = kind === 'root' ? state.root! : path
   const items: (PopupItem | '-')[] = []
   if (kind === 'file') {
-    // 两种格式的可用性规则相同：都是「导出被右键的那一篇」，都要先读文本再离线渲染
-    items.push({ id: 'open', label: '打开' })
-    // 同一个文件只能有一个窗口：正开在当前窗口里就没必要再开（开出来是同一篇），
-    // 已被别的窗口开着则把菜单项改成「前往」，点了是切过去而不是再开一个。
-    const owner = await window.api.documentOwner(path)
-    items.push(owner.other
-      ? { id: 'open-window', label: '前往已打开的窗口' }
-      : { id: 'open-window', label: '在新窗口中打开', enabled: !owner.self, ...(owner.self ? { hint: '已在此窗口' } : {}) })
-    items.push('-')
-    items.push({ id: 'export-pdf', label: '导出为 PDF…' }, { id: 'export-docx', label: '导出为 Word…' }, '-')
-    items.push({ id: 'rename', label: '重命名' }, { id: 'reveal', label: '在文件管理器中显示' }, '-')
+    items.push({ id: 'open', label: '打开' }, { id: 'rename', label: '重命名' },
+      { id: 'reveal', label: '在文件管理器中显示' }, '-')
     items.push({ id: 'delete', label: '移到废纸篓' })
   } else if (kind === 'dir') {
     items.push({ id: 'new-file', label: '新建文件' }, { id: 'new-folder', label: '新建文件夹' }, '-')
@@ -1180,9 +1132,6 @@ async function showTreeMenu(kind: 'file' | 'dir' | 'root', path: string, x: numb
   if (!id) return
   switch (id) {
     case 'open': void openFile(path); break
-    case 'open-window': await openInNewWindow(path); break
-    case 'export-pdf': await exportPath(path, 'pdf'); break
-    case 'export-docx': await exportPath(path, 'docx'); break
     case 'reveal': void window.api.reveal(target); break
     case 'open-dir': void window.api.openDir(target); break
     case 'new-file': await createEntry(target, 'file'); break
@@ -1196,16 +1145,6 @@ function startTreeRename(path: string) {
   treeCtl.startRename(path)
 }
 
-/**
- * 文件树右键「在新窗口中打开」/「前往已打开的窗口」。
- * 主进程会拒绝为已在某个窗口里打开的文档再开一个：「focus」表示它只是把那个窗口
- * 抬到了前面，这里如实说一声；否则用户看到窗口「闪了一下什么都没发生」会以为坏了。
- */
-async function openInNewWindow(path: string) {
-  const result = await window.api.openInNewWindow(path)
-  if (result === 'invalid') setStatus('无法打开该文件：文件不存在或不是 Markdown', true)
-  else if (result === 'focus') setStatus(`「${basename(path)}」已在另一个窗口中打开，已切换到那个窗口`)
-}
 
 async function createEntry(parent: string, type: 'file' | 'dir') {
   try {
@@ -1420,77 +1359,6 @@ els.linkInput.addEventListener('keydown', (e) => {
   }
 })
 
-// ---------- 代码块复制按钮（悬浮在代码块右下角，悬停出现） ----------
-
-// 按钮是**应用自己的 DOM**（挂在 body 上、position:fixed），不进 ProseMirror 文档 ——
-// 塞进 pre 里会被 PM 当作文档内容清掉；导出走离线渲染、天生不带这个按钮。
-// 位置放右下角：右上角被语言角标的 130×26 命中区占着（见 editor.ts 的角标点击判断）。
-const codeCopyBtn = document.createElement('button')
-codeCopyBtn.id = 'code-copy'
-codeCopyBtn.className = 'hidden'
-codeCopyBtn.title = '复制代码'
-codeCopyBtn.setAttribute('aria-label', '复制代码')
-codeCopyBtn.innerHTML =
-  '<svg class="ic-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>' +
-  '<svg class="ic-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3.2 8.6 3.4 3.4 6.2-7.4"/></svg>'
-document.body.append(codeCopyBtn)
-
-let codeCopyTarget: HTMLElement | null = null
-let codeCopyTimer: number | undefined
-
-function hideCodeCopy() {
-  codeCopyTarget = null
-  codeCopyBtn.classList.add('hidden')
-  codeCopyBtn.classList.remove('copied')
-}
-
-/** 贴到 pre 的右下角（内缩 10px）；代码块底部滚出视口时按钮收进来，可见部分太小就藏 */
-function placeCodeCopy(pre: HTMLElement) {
-  const r = pre.getBoundingClientRect()
-  const BTN = 28, INSET = 10
-  const top = Math.min(r.bottom - INSET - BTN, window.innerHeight - INSET - BTN)
-  if (top < r.top + INSET || r.right - r.left < BTN * 3) { hideCodeCopy(); return }
-  codeCopyBtn.style.top = `${top}px`
-  codeCopyBtn.style.left = `${r.right - INSET - BTN}px`
-  codeCopyTarget = pre
-  codeCopyBtn.classList.remove('hidden')
-}
-
-els.editor.addEventListener('mouseover', (e) => {
-  const pre = (e.target as HTMLElement).closest('pre')
-  if (pre) placeCodeCopy(pre)
-})
-els.editor.addEventListener('mouseout', (e) => {
-  const from = (e.target as HTMLElement).closest?.('pre')
-  if (!from || from !== codeCopyTarget) return
-  const to = e.relatedTarget as HTMLElement | null
-  if (!to || !to.closest || to.closest('pre') !== from) hideCodeCopy()
-})
-// 滚动时跟随目标代码块；目标滚没了自然会被 placeCodeCopy 藏掉
-els.editorWrap.addEventListener('scroll', () => { if (codeCopyTarget) placeCodeCopy(codeCopyTarget) }, { capture: false })
-
-codeCopyBtn.addEventListener('mousedown', (e) => e.preventDefault()) // 不抢编辑器焦点，免得气泡菜单闪没
-codeCopyBtn.addEventListener('click', () => {
-  if (!codeCopyTarget) return
-  const text = codeCopyTarget.textContent || ''
-  const done = () => {
-    codeCopyBtn.classList.add('copied')
-    codeCopyBtn.title = '已复制'
-    clearTimeout(codeCopyTimer)
-    codeCopyTimer = window.setTimeout(() => { codeCopyBtn.classList.remove('copied'); codeCopyBtn.title = '复制代码' }, 1200)
-  }
-  void navigator.clipboard.writeText(text).then(done).catch(() => {
-    // 兜底：clipboard API 不可用时走老办法
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.opacity = '0'
-    document.body.append(ta)
-    ta.select()
-    try { document.execCommand('copy'); done() } catch { /* 放弃 */ }
-    ta.remove()
-  })
-})
 
 // ---------- 查找 / 替换 ----------
 
@@ -1732,14 +1600,9 @@ for (const input of [findInput, findReplaceInput]) {
 // ---------- sidebar / misc buttons ----------
 
 function toggleSidebar() {
-  // 独立窗口没有侧栏，切换无从谈起（顶栏按钮也已隐藏，只有菜单 / 快捷键会走到这）
-  if (STANDALONE) return
-  const show = document.body.classList.contains('no-sidebar')
-  // 展开侧栏前先看右侧目录：窗口窄到两块只能留一块时把目录收掉（刚点的这块优先）
-  if (show && tocOpen && panelsExclusive()) {
-    setTocOpen(false)
-    setStatus('窗口较窄，已收起目录')
-  }
+  // ⚠️ 独立窗口与单文件模式**也有侧栏**了（大纲搬进来之后），
+  // 所以这里不再 early-return —— 它们同样能收，只是宽度是定宽那档。
+  // 顶部「切换边栏」按钮在单文件 / 独立窗口下也不再隐藏。
   document.body.classList.toggle('no-sidebar')
   // 侧栏重新露出来之后，按此刻的空间算一遍渲染宽度
   applySidebarWidth()
@@ -1799,105 +1662,15 @@ async function chooseAndOpenFile() {
   if (p) void openSingleFile(p)
 }
 
-// ---------- export pdf ----------
-
-/**
- * 「导出为 PDF…」菜单项的可用性：只要打开了文档就可以，与编辑模式无关。
- * 导出不再读编辑器的 DOM —— 一律把 Markdown 交给编辑器同一套扩展离线渲染，
- * 所以纯文本模式下同样可用（取的就是那个 textarea 里的文本）。
- */
-function syncExportAvailability() {
-  void window.api.setExportEnabled(!!state.openPath)
-}
-
-/** 导出格式。两条路共用前面「取文本 → 离线渲染」那一半，只有出口不同。 */
-type ExportFormat = 'pdf' | 'docx'
-
-/** 把一份 HTML 交给主进程打印成 PDF —— 导出 PDF 的唯一出口 */
-async function renderPdf(html: string, name: string) {
-  try {
-    // 样式在隐藏窗口里原样重放，正文配色固定走浅色主题（深色底印在纸上费墨且难读）
-    const saved = await window.api.exportPdf({
-      html,
-      css: `${editorCss}\n${printCss}`,
-      name,
-    })
-    if (saved) setStatus(`已导出 ${basename(saved)}`)
-  } catch (e) {
-    setStatus('导出失败：' + (e as Error).message, true)
-  }
-}
-
-/**
- * 把文档模型交给主进程组装成 .docx —— 导出 Word 的唯一出口。
- *
- * 与 PDF 最大的不同：Word 不吃 CSS，那边「重放 style.css」的招数用不上。
- * 样式是在主进程里**照 style.css 抄一份** Word 的排版元素（见 docx-export.cjs），
- * 所以 docx 是「结构正确、可在 Word 里继续编辑」，观感接近但不保证与编辑器一致。
- */
-async function renderDocx(doc: JSONContent, baseDir: string, name: string) {
-  try {
-    const result = await window.api.exportDocx({ doc, baseDir, name })
-    if (!result) return
-    // 读不到或格式不支持的图片（webp/avif 之类）会被跳过，如实说而不是假装成功
-    setStatus(result.skipped
-      ? `已导出 ${basename(result.path)}（${result.skipped} 张图片未能嵌入）`
-      : `已导出 ${basename(result.path)}`)
-  } catch (e) {
-    setStatus('导出失败：' + (e as Error).message, true)
-  }
-}
-
-/**
- * 导出任意一个 .md —— 菜单项 / 快捷键 / 文件树右键都走这里。
- *
- * 无论导出的是不是当前文档，路径都相同：拿到 Markdown 文本 → 离线渲染
- * （editor.ts 的 markdownToHtml / markdownToDoc，与编辑器同一批扩展）→ 交给主进程出文件。
- * 因此
- *   - 不依赖编辑模式：纯文本模式下取 textarea 里的文本，同样能导出；
- *   - 不切换文档：当前文档的滚动位置、选区和撤销栈都原样保留；
- *   - 不写盘：磁盘上的 .md 保持原样，未保存的编辑也如实导出。
- */
-async function exportPath(path: string, format: ExportFormat) {
-  let md: string
-  if (path === state.openPath) {
-    // 当前文档直接取编辑器里的文本，未落盘的改动一并导出
-    md = currentDocumentText()
-  } else {
-    try {
-      md = await window.api.read(path)
-    } catch {
-      setStatus('无法读取该文件', true)
-      return
-    }
-  }
-  // 离线的图片路径要按**目标文档自己的目录**解析，所以这里传 dirname(path)
-  const dir = dirname(path)
-  const name = basename(path).replace(MD_RE, '')
-  if (format === 'docx') await renderDocx(markdownToDoc(md, dir), dir, name)
-  else await renderPdf(markdownToHtml(md, dir), name)
-}
-
-/** 导出当前打开的文档（菜单项 / 快捷键） */
-async function exportCurrent(format: ExportFormat) {
-  if (!state.openPath) {
-    setStatus('请先打开一个文档', true)
-    return
-  }
-  await exportPath(state.openPath, format)
-}
 
 // ---------- menu events ----------
 
 window.api.onMenu(async (action) => {
   switch (action) {
-    // 独立窗口没有工作空间概念：在这里执行 openWorkspace 会把 state.root 设上、
-    // 侧栏却被 body.standalone 永久隐藏，得到一个「看不见文件树的工作区」错位状态（E1）
-    case 'open-folder': if (!STANDALONE) await chooseAndOpen(); break
+    case 'open-folder': await chooseAndOpen(); break
     case 'new-file': if (state.root) await createEntry(state.root, 'file'); break
     case 'save': await doSave(); break
-    // 独立窗口没有工作空间可关；它也没有欢迎页可回（见 style.css 的 body.standalone）
-    case 'close-workspace': if (!STANDALONE) await closeWorkspace(); break
+    case 'close-workspace': await closeWorkspace(); break
     case 'undo':
       if (editorMode === 'source') { els.sourceEditor.focus(); document.execCommand('undo') }
       else editorCtl.undo()
@@ -1907,9 +1680,8 @@ window.api.onMenu(async (action) => {
       else editorCtl.redo()
       break
     case 'link': openLinkPopover(); break
-    case 'export-pdf': await exportCurrent('pdf'); break
-    case 'export-docx': await exportCurrent('docx'); break
     case 'toggle-sidebar': toggleSidebar(); break
+    case 'toggle-outline': toggleOutline(); break
   }
 })
 
@@ -1983,7 +1755,6 @@ window.addEventListener('drop', (e) => {
 renderRecents()
 // 先同步一次导出可用性：菜单项是应用级的，谁聚焦就显示谁的状态，
 // 空窗口也要明确登记一次，否则会残留上一个聚焦窗口的判定
-syncExportAvailability()
 // 上次退出前的兜底保存（fs:flush）失败过：主进程把原因存在 userData，这里取出来提示。
 // 兜底保存本身失败时页面正在卸载、没有任何界面能显示错误，只能靠这一句（A3/A7）
 const saveError = await window.api.takeSaveError()

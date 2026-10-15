@@ -13,6 +13,27 @@ export function dirname(p: string): string {
   return s.slice(0, i)
 }
 
+/**
+ * 两个绝对路径是不是同一个位置。
+ *
+ * 统一三件事，否则同一个位置会被判成不同：
+ *  1. 分隔符：Windows 上同一目录可能是 `C:\a\b` 也可能是 `C:/a/b`
+ *  2. 大小写：Windows / macOS 文件系统不区分大小写，`C:\A` 与 `c:\a` 是同一个目录；
+ *     Linux 区分，所以**只在 win32 与 darwin 上忽略大小写**
+ *  3. 末尾斜杠：`C:\a\` 与 `C:\a` 是同一个目录
+ *
+ * 用于「重复打开同一个文件夹 / 文件」的判据 —— 那条路上判错一次就会把用户
+ * 正在编辑的内容清掉（重开工作空间会走showEditorEmpty()），宁可宽松一点。
+ */
+export function samePath(a: string | null, b: string | null): boolean {
+  if (!a || !b) return a === b
+  const norm = (p: string) => {
+    const s = posixify(p).replace(/\/+$/, '')
+    return typeof window !== 'undefined' && window.api?.platform === 'linux' ? s : s.toLowerCase()
+  }
+  return norm(a) === norm(b)
+}
+
 /** 绝对路径 + 相对路径（支持 .. 与 .）合并为绝对 posix 路径 */
 export function resolveRel(dir: string, rel: string): string {
   const r = posixify(rel).split('/').map((seg) => {
@@ -106,7 +127,10 @@ export interface Api {
   setRoot(root: string): Promise<boolean>
   /** 单文件模式：把拖拽 / 双击得到的路径登记为主进程可读写的文件 */
   allowFile(p: string): Promise<boolean>
+  /** 读取工作空间根目录那一层（目录节点不带 children） */
   tree(root: string): Promise<TreeNode[]>
+  /** 懒加载：展开某个目录时才读它那一层 */
+  children(dir: string): Promise<TreeNode[]>
   read(p: string): Promise<string>
   /** 文件状态（mtime / size）：用来发现「磁盘上的文件被别的程序改过了」 */
   stat(p: string): Promise<{ mtimeMs: number; size: number } | null>
@@ -157,8 +181,6 @@ export interface Api {
   claimDocument(p: string | null): Promise<{ ok: boolean; self: boolean }>
   /** 释放本窗口认领的文档（关闭工作空间、文档被删除后调用） */
   releaseDocument(): Promise<boolean>
-  /** 查一篇文档当前的归属（右键菜单据此决定菜单项怎么写） */
-  documentOwner(p: string): Promise<{ self: boolean; other: boolean }>
   /**
    * 查 p 自己或其子孙路径里有没有被占用的文档（重命名 / 删除**目录**前用）。
    * 目录里的文件正在别的窗口开着时，那个窗口的自动保存会把旧路径连目录一起写回来。

@@ -55,3 +55,8 @@ build/_bubblecheck.json
 build/_shots/
 build/export-preview.*
 build/_ci_monitor.cjs
+
+# 验证脚本的输出数据与生成的预览页（脚本本体入库，产物不入库）
+build/measure2.json
+build/pane.json
+build/_icon_preview.html

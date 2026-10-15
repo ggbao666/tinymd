@@ -4,7 +4,6 @@ directories:
   output: release
 files:
   - main.js
-  - docx-export.cjs
   - preload.cjs
   - dist/renderer/**/*
   - build/icon.png

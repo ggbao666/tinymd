@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   setRoot: (root) => ipcRenderer.invoke('workspace:setRoot', root),
   allowFile: (p) => ipcRenderer.invoke('workspace:allowFile', p),
   tree: (root) => ipcRenderer.invoke('fs:tree', root),
+  // 懒加载：展开某个目录时才读它那一层。主进程那边会过 assertReadable 校验。
+  children: (dir) => ipcRenderer.invoke('fs:children', dir),
   read: (p) => ipcRenderer.invoke('fs:read', p),
   stat: (p) => ipcRenderer.invoke('fs:stat', p),
   watchFile: (p) => ipcRenderer.invoke('fs:watchFile', p),
@@ -29,9 +31,6 @@ contextBridge.exposeInMainWorld('api', {
   allowImageDirectory: (directory) => ipcRenderer.invoke('img:allowDirectory', directory),
   saveImage: (fileName, data, documentPath, storage) => ipcRenderer.invoke('img:save', fileName, data, documentPath, storage),
   downloadImage: (url, documentPath, storage) => ipcRenderer.invoke('img:download', url, documentPath, storage),
-  exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
-  exportDocx: (payload) => ipcRenderer.invoke('export:docx', payload),
-  setExportEnabled: (enabled) => ipcRenderer.invoke('ui:exportState', enabled),
 
   openExternal: (url) => ipcRenderer.invoke('ui:openExternal', url),
   clipboard: (action) => ipcRenderer.invoke('ui:clipboard', action),
@@ -40,10 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   setTheme: (mode) => ipcRenderer.invoke('ui:theme', mode),
   openImageViewer: (src, title) => ipcRenderer.invoke('ui:imageViewer', { src, title }),
   imageViewerData: () => ipcRenderer.invoke('ui:imageViewerData'),
-  openInNewWindow: (p) => ipcRenderer.invoke('window:standalone', p),
   claimDocument: (p) => ipcRenderer.invoke('doc:claim', p),
   releaseDocument: () => ipcRenderer.invoke('doc:release'),
-  documentOwner: (p) => ipcRenderer.invoke('doc:owner', p),
   ownerPrefix: (p) => ipcRenderer.invoke('doc:ownerPrefix', p),
 
   initialFile: () => ipcRenderer.invoke('app:initialFile'),

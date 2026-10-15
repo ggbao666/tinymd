@@ -1,0 +1,12 @@
+const { app, BrowserWindow } = require('electron')
+const path = require('path')
+app.commandLine.appendSwitch('no-sandbox'); app.commandLine.appendSwitch('disable-gpu')
+app.disableHardwareAcceleration()
+app.whenReady().then(async () => {
+  const w = new BrowserWindow({ show: false, width: 420, height: 220, webPreferences: { offscreen: true } })
+  await w.loadFile(path.join(__dirname, '_icon_preview.html'))
+  await new Promise(r => setTimeout(r, 500))
+  const img = await w.webContents.capturePage()
+  require('fs').writeFileSync(path.join(__dirname, '_shots', 'icon-fileinfolder.png'), img.toPNG())
+  app.exit(0)
+})

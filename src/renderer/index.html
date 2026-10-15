@@ -36,11 +36,11 @@
         <h1>tinymd</h1>
         <div class="entry-links">
           <button id="btn-open-folder" class="btn-open">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2 12.9V4.5c0-.4.3-.7.7-.7h3.2l1.4 1.4h5.9c.4 0 .7.3.7.7v1.5"/><path d="M1.7 12.9l1.5-4.1c.1-.3.4-.5.7-.5h9.9c.5 0 .8.5.7.9l-1.3 3.2c-.1.3-.4.5-.7.5H1.7Z"/></svg>
             打开文件夹…
           </button>
           <button id="btn-open-file" class="btn-link">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2.5 1.8h6L12 5.3v8.2c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V2.5c0-.4.3-.7.7-.7Z"/><path d="M8.5 1.8v3.5H12" stroke-linecap="round"/></svg>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M4.8 2h4.2l2.5 2.5v6.9"/><path d="M9 2v2.5h2.5" stroke-linecap="round"/><path d="M4.8 2v9.4"/><path d="M1.4 12.6V5.9c0-.4.3-.7.7-.7h1.5"/><path d="M1.2 13.9l1.5-3.6c.1-.3.4-.5.7-.5h8.6c.5 0 .8.5.6.9l-1.2 2.7c-.1.3-.4.5-.7.5H1.2Z"/></svg>
             打开文件…
           </button>
         </div>
@@ -58,14 +58,15 @@
           <div id="breadcrumb"></div>
         </div>
         <div class="topbar-right">
-          <!-- 文档目录：和「纯文本模式 / 设置」同一排，点一下展开、再点一下收起
-               （Ctrl/Cmd + Shift + O 同效，Esc 也能收起）。展开时目录从右边摊进编辑区、
-               正文让出 246px，窗口一像素不动。
-               ⚠️ 它曾经是 absolute 定位挂在 #content 上、落在正文右侧那条留白里；
-               现在归到标题栏这一组，位置交给 .topbar-right 的 flex + gap 排，
-               所以 CSS 里不再有 --toc-btn-w / --toc-btn-right 那套算式。 -->
-          <button id="btn-toc" class="icon-btn" title="文档目录 (Ctrl/Cmd + Shift + O)" aria-label="文档目录" aria-pressed="false">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h9M5.5 8h9M5.5 12h9"/><circle cx="2.4" cy="4" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>
+          <!-- 打开文件夹 / 打开文件：目录面板（原 btn-toc）并进左侧栏之后，右侧那排不需要
+               「文档目录」了，这两个位置换成更常用的两个入口 —— 工作空间开着时也能直接换一个
+               文件夹、或直接开一个散落在别处的单文件。两者与欢迎页那对按钮走同一个
+               chooseFolder / chooseFile 入口（点击后切到单文件模式，形态与从欢迎页进来完全一致）。 -->
+          <button id="btn-open-folder-ws" class="icon-btn" title="打开文件夹 (Ctrl/Cmd + O)" aria-label="打开文件夹">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2 12.9V4.5c0-.4.3-.7.7-.7h3.2l1.4 1.4h5.9c.4 0 .7.3.7.7v1.5"/><path d="M1.7 12.9l1.5-4.1c.1-.3.4-.5.7-.5h9.9c.5 0 .8.5.7.9l-1.3 3.2c-.1.3-.4.5-.7.5H1.7Z"/></svg>
+          </button>
+          <button id="btn-open-file-ws" class="icon-btn" title="打开文件" aria-label="打开文件">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M4.8 2h4.2l2.5 2.5v6.9"/><path d="M9 2v2.5h2.5" stroke-linecap="round"/><path d="M4.8 2v9.4"/><path d="M1.4 12.6V5.9c0-.4.3-.7.7-.7h1.5"/><path d="M1.2 13.9l1.5-3.6c.1-.3.4-.5.7-.5h8.6c.5 0 .8.5.6.9l-1.2 2.7c-.1.3-.4.5-.7.5H1.2Z"/></svg>
           </button>
           <button id="btn-source-mode" class="icon-btn" title="切换到纯文本模式" aria-label="切换到纯文本模式" aria-pressed="false">
             <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 4.5-4 4.5 4 4.5M11.5 4.5l4 4.5-4 4.5M10.2 3.2 7.8 14.8"/></svg>
@@ -78,17 +79,38 @@
 
       <div class="ws-body">
         <aside id="sidebar">
-          <div id="sidebar-files-label">文件</div>
-          <div id="tree"></div>
-          <div id="sidebar-footer">
-            <button id="btn-add-file" class="icon-btn small" title="新建文件">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
-            </button>
-            <button id="btn-add-folder" class="icon-btn small" title="新建文件夹">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/><path d="M8 7v4M6 9h4" stroke-linecap="round"/></svg>
-            </button>
-            <span id="ws-path"></span>
+          <!-- 侧栏头部：左端两枚**纯图标**按钮切换「文件 / 大纲」两页，右端两个新建按钮。
+               目录（大纲）以前在编辑区右侧，现在搬到这里和文件树同栏、同页互斥：
+               整屏只剩「左栏 + 正文」两栏，正文因此能拿到完整宽度。
+               ⚠️ 两页不是同时显示的，靠 body.side-outline 切 display（见 style.css）。
+               ⚠️ 用图标而不是「文件 / 大纲」文字分段控件：这一行右侧已经是图标按钮了，
+               左侧再来一排带字的标签，同一行里两套语言。现在整行统一成四枚 .icon-btn
+               （30px / 圆角 7 / 图标 16px），与顶栏 .topbar-right 那一组完全同款；
+               当前页靠 .icon-btn.active 的 accent 底色表示 ——「哪一页在显示」这件事
+               由高亮色讲，文字标签并非必需（顶栏那组也都没有文字）。
+               ⚠️ 单文件模式 / 独立窗口没有文件树，只剩大纲这一页 —— 头部整块隐藏
+               （body.file-mode / body.standalone 在 style.css 里把 .sidebar-head 藏掉）。 -->
+          <div class="sidebar-head">
+            <div class="sidebar-head-tabs" role="tablist" aria-label="侧栏视图">
+              <button id="tab-files" class="icon-btn side-tab active" role="tab" aria-selected="true" aria-label="文件" title="文件">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/></svg>
+              </button>
+              <button id="tab-outline" class="icon-btn side-tab" role="tab" aria-selected="false" aria-label="大纲" title="文档大纲 (Ctrl/Cmd + Shift + O)">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h9M5.5 8h9M5.5 12h9"/><circle cx="2.4" cy="4" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.4" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>
+              </button>
+            </div>
+            <div class="sidebar-head-actions">
+              <button id="btn-add-file" class="icon-btn" title="新建文件">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+              </button>
+              <button id="btn-add-folder" class="icon-btn" title="新建文件夹">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M1.8 4.2c0-.4.3-.7.7-.7h3.4l1.3 1.5h6.3c.4 0 .7.3.7.7v6.8c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7V4.2Z"/><path d="M8 7v4M6 9h4" stroke-linecap="round"/></svg>
+              </button>
+            </div>
           </div>
+
+          <div id="tree"></div>
+          <div id="outline" role="tabpanel" aria-label="文档大纲"></div>
           <div id="sidebar-resize" title="拖动调整宽度"></div>
         </aside>
 
@@ -107,17 +129,17 @@
           <div id="source-wrap" class="hidden">
             <textarea id="source-editor" aria-label="Markdown 纯文本编辑器" placeholder="在这里编辑 Markdown 源文本…" spellcheck="false" wrap="soft"></textarea>
           </div>
-          <div id="status-pill">
-            <span id="status"></span>
-            <span id="count"></span>
-          </div>
-
-          <!-- 文档目录面板：往编辑区里摊开（正文让出 246px），开关按钮在标题栏上 -->
-          <aside id="toc-float" aria-label="文档目录" aria-hidden="true">
-            <div id="toc-float-list"></div>
-          </aside>
         </main>
       </div>
+
+      <!-- 底部状态栏：**整窗一条**（原来只有 #content 那一段，左侧栏自己还有个底栏，
+           两段底栏同高却不对齐，扫一眼是「两截」）。现在路径、保存状态、字数三段同处一条基线。
+           ⚠️ 目录面板不再压在正文右侧，所以这条栏也不需要为它让位。 -->
+      <footer id="statusbar">
+        <span id="ws-path" class="statusbar-path" title=""></span>
+        <span id="status" class="statusbar-status"></span>
+        <span id="count" class="statusbar-count"></span>
+      </footer>
     </div>
 
     <!-- 选中文本浮出格式气泡 -->
