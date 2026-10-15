@@ -80,6 +80,7 @@ app.whenReady().then(async () => {
       // 顶栏「打开文件夹/打开文件」两个图标的 path —— 曾因两个都是圆角方块被用户指出分不清
       dFolder: [...document.querySelectorAll('#btn-open-folder-ws svg path')].map((x) => x.getAttribute('d')).join('|'),
       dFile: [...document.querySelectorAll('#btn-open-file-ws svg path')].map((x) => x.getAttribute('d')).join('|'),
+      dAddFile: [...document.querySelectorAll('#btn-add-file svg path')].map((x) => x.getAttribute('d')).join('|'),
     }
   })()`)
 
@@ -108,7 +109,10 @@ app.whenReady().then(async () => {
     { bg: m.tabsBg, border: m.tabsBorder })
   ok('打开文件夹/文件图标形状不同（可区分）', m.dFolder !== m.dFile, { folder: m.dFolder.slice(0, 30), file: m.dFile.slice(0, 30) })
   ok('打开文件夹是开口形状（含前面板斜线）', m.dFolder.includes('12.9'), m.dFolder.slice(0, 40))
-  ok('打开文件是「文件夹夹纸」形状（与树里的纸图标区分）', m.dFile.includes('12.6') && m.dFile.includes('4.8 2'), m.dFile.slice(0, 40))
+  // 用户指定「打开文件」用回纯纸（2026-10-15）——与树里文件条目同款
+  ok('打开文件是纸形状（折角 1.8 起）', m.dFile.includes('M2.2 9.3V1.9') && m.dFile.includes('10.4 1.2'), m.dFile.slice(0, 40))
+  // 新建文件 = file-plus（纸+加号），与 folder-plus 成对
+  ok('新建文件是 file-plus（纸+加号）', m.dAddFile && m.dAddFile.includes('M2.5 8.6V2.2') && m.dAddFile.includes('M5.6 9.7v3.6'), m.dAddFile ? m.dAddFile.slice(0, 40) : '')
 
   // 亮色 + 大纲页（按钮应隐藏但头部不塌）
   await js(W, `document.querySelector('#btn-image-settings').click(); 1`); await sleep(400)
