@@ -109,10 +109,13 @@ app.whenReady().then(async () => {
     { bg: m.tabsBg, border: m.tabsBorder })
   ok('打开文件夹/文件图标形状不同（可区分）', m.dFolder !== m.dFile, { folder: m.dFolder.slice(0, 30), file: m.dFile.slice(0, 30) })
   ok('打开文件夹是开口形状（含前面板斜线）', m.dFolder.includes('12.9'), m.dFolder.slice(0, 40))
-  // 用户指定「打开文件」用回纯纸（2026-10-15）——与树里文件条目同款
-  ok('打开文件是纸形状（折角 1.8 起）', m.dFile.includes('M2.2 9.3V1.9') && m.dFile.includes('10.4 1.2'), m.dFile.slice(0, 40))
-  // 新建文件 = file-plus（纸+加号），与 folder-plus 成对
-  ok('新建文件是 file-plus（纸+加号）', m.dAddFile && m.dAddFile.includes('M2.5 8.6V2.2') && m.dAddFile.includes('M5.6 9.7v3.6'), m.dAddFile ? m.dAddFile.slice(0, 40) : '')
+  // 用户指定：打开文件 = 纯纸（折角文件），新建文件 = file-plus（纸+中心加号）
+  ok('打开文件是纸形状（折角完整、右缘到底）',
+    m.dFile.includes('M2 12.5V3.5') && m.dFile.includes('M8.5 3.5h4.5v4.5'), m.dFile.slice(0, 80))
+  // 新建文件 = file-plus（纸+加号），加号居中
+  ok('新建文件是 file-plus（纸+中心加号）',
+    m.dAddFile && m.dAddFile.includes('M2 12.5V3.5') && m.dAddFile.includes('M7.5 6v4') && m.dAddFile.includes('M5.5 8h4'),
+    m.dAddFile ? m.dAddFile.slice(0, 80) : '')
 
   // 亮色 + 大纲页（按钮应隐藏但头部不塌）
   await js(W, `document.querySelector('#btn-image-settings').click(); 1`); await sleep(400)
